@@ -4,3 +4,8 @@ pydantic
 pydantic-settings
 python-dotenv
 sqlalchemy
+chromadb
+langchain-chroma
+langchain-text-splitters
+langchain-mistralai
+langchain-openai
