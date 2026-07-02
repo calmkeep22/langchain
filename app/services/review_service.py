@@ -9,6 +9,8 @@ from app.core.errors import ServiceError
 from app.core.llm import LLMConfigError, get_llm
 from app.core.logging import log_event
 from app.core.vector_store import get_code_vector_store, get_docs_vector_store
+from app.models.chunk import Chunk
+from app.models.retrieval_log import RetrievalLog
 from app.models.review import Review
 from app.services.project_service import get_project
 
@@ -94,6 +96,26 @@ def _build_doc_context(results: list[tuple]) -> tuple[str, list[dict]]:
             }
         )
     return "\n\n---\n\n".join(blocks), official_references
+
+
+def _save_retrieval_logs(
+    db: Session, review_id: int, results: list[tuple], source_type: str
+) -> None:
+    for rank, (doc, score) in enumerate(results, start=1):
+        meta = doc.metadata
+        vector_id = meta.get("vector_id")
+        chunk = db.query(Chunk).filter(Chunk.vector_id == vector_id).first() if vector_id else None
+        source = meta.get("file_path") if source_type == "code" else meta.get("source")
+        db.add(
+            RetrievalLog(
+                review_id=review_id,
+                chunk_id=chunk.id if chunk else None,
+                source_type=source_type,
+                source=source,
+                rank=rank,
+                score=round(score, 4),
+            )
+        )
 
 
 def create_review(
@@ -192,6 +214,10 @@ def create_review(
     db.add(review)
     db.commit()
     db.refresh(review)
+
+    _save_retrieval_logs(db, review.id, code_results, "code")
+    _save_retrieval_logs(db, review.id, doc_results, "official_doc")
+    db.commit()
 
     log_event(
         "rag_review_completed",
