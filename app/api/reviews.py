@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import ServiceError, service_error_response
 from app.db.session import get_db
-from app.schemas.common import SuccessResponse, new_request_id
+from app.schemas.common import SuccessResponse, current_request_id
 from app.schemas.review import ReviewCreateRequest
 from app.services.review_service import create_review, get_review
 
@@ -23,7 +23,7 @@ def create_review_endpoint(payload: ReviewCreateRequest, db: Session = Depends(g
     except ServiceError as exc:
         return service_error_response(exc)
 
-    return SuccessResponse(data=result, request_id=new_request_id())
+    return SuccessResponse(data=result, request_id=current_request_id())
 
 
 @router.get("/reviews/{review_id}")
@@ -41,5 +41,5 @@ def read_review(review_id: int, db: Session = Depends(get_db)):
             "answer": review.answer,
             "created_at": review.created_at.isoformat(),
         },
-        request_id=new_request_id(),
+        request_id=current_request_id(),
     )

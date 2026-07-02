@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.embeddings import EmbeddingConfigError, get_embeddings
 from app.core.errors import ServiceError
 from app.core.llm import LLMConfigError, get_llm
+from app.core.logging import log_event
 from app.core.vector_store import get_code_vector_store, get_docs_vector_store
 from app.models.review import Review
 from app.services.project_service import get_project
@@ -109,14 +110,22 @@ def create_review(
 
     project = get_project(db, project_id)
 
+    start = time.perf_counter()
+    log_event(
+        "rag_review_started",
+        project_id=project.id,
+        question_length=len(question),
+        code_top_k=code_top_k,
+        doc_top_k=doc_top_k,
+    )
+
     if embeddings is None:
         try:
             embeddings = get_embeddings()
         except EmbeddingConfigError as exc:
             raise ServiceError("EMBEDDING_FAILED", str(exc), 502) from exc
 
-    start = time.perf_counter()
-
+    retrieval_start = time.perf_counter()
     try:
         code_results = get_code_vector_store(embeddings).similarity_search_with_score(
             question, k=code_top_k, filter={"project_id": project.id}
@@ -132,6 +141,16 @@ def create_review(
             "NO_RELEVANT_CONTEXT", "No relevant code or documentation found.", 422
         )
 
+    log_event(
+        "retrieval_completed",
+        project_id=project.id,
+        code_chunks=len(code_results),
+        doc_chunks=len(doc_results),
+        top_code_score=round(code_results[0][1], 4) if code_results else None,
+        top_doc_score=round(doc_results[0][1], 4) if doc_results else None,
+        latency_ms=int((time.perf_counter() - retrieval_start) * 1000),
+    )
+
     code_context, related_code = _build_code_context(code_results)
     doc_context, official_references = _build_doc_context(doc_results)
 
@@ -145,13 +164,22 @@ def create_review(
         question=question, code_context=code_context, doc_context=doc_context
     )
 
+    llm_start = time.perf_counter()
     try:
         result: ReviewAnswer = llm.with_structured_output(ReviewAnswer).invoke(prompt)
     except Exception as exc:
         raise ServiceError("LLM_CALL_FAILED", "LLM API request failed.", 502) from exc
 
-    latency_ms = int((time.perf_counter() - start) * 1000)
     model_name = getattr(llm, "model", None) or getattr(llm, "model_name", None)
+    log_event(
+        "llm_call_completed",
+        model=model_name,
+        input_tokens=None,
+        output_tokens=None,
+        latency_ms=int((time.perf_counter() - llm_start) * 1000),
+    )
+
+    latency_ms = int((time.perf_counter() - start) * 1000)
 
     review = Review(
         project_id=project.id,
@@ -164,6 +192,17 @@ def create_review(
     db.add(review)
     db.commit()
     db.refresh(review)
+
+    log_event(
+        "rag_review_completed",
+        review_id=review.id,
+        project_id=project.id,
+        verdict=review.verdict,
+        code_chunks=len(code_results),
+        doc_chunks=len(doc_results),
+        model=model_name,
+        latency_ms=latency_ms,
+    )
 
     return {
         "review_id": review.id,

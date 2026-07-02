@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time
 import uuid
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.embeddings import EmbeddingConfigError, get_embeddings
 from app.core.errors import ServiceError
+from app.core.logging import log_event
 from app.core.tree import build_url_tree
 from app.core.vector_store import get_docs_vector_store
 from app.models.chunk import Chunk
@@ -44,6 +46,7 @@ def index_docs(
     force_reindex: bool = False,
     embeddings=None,
 ) -> dict:
+    start = time.perf_counter()
     pages = _load_pages(path, url, max_depth)
 
     if embeddings is None:
@@ -152,6 +155,17 @@ def index_docs(
     db.commit()
 
     page_tree = build_url_tree([p["url"] for p in pages]) if url else None
+
+    latency_ms = int((time.perf_counter() - start) * 1000)
+    log_event(
+        "docs_indexing_completed",
+        doc_name=doc_name,
+        indexed_documents=indexed_documents,
+        indexed_chunks=indexed_chunks,
+        skipped_documents=skipped_documents,
+        page_tree=page_tree,
+        latency_ms=latency_ms,
+    )
 
     return {
         "doc_name": doc_name,
