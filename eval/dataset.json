@@ -1,0 +1,177 @@
+[
+  {
+    "query": "파일 내용이 바뀌지 않았을 때 재임베딩을 방지하는 코드는?",
+    "expected_file": "services/code_indexing_service.py",
+    "expected_symbol": "index_project_code"
+  },
+  {
+    "query": "SQLite 세션을 요청이 끝난 후 닫는 부분은?",
+    "expected_file": "db/session.py",
+    "expected_symbol": "get_db"
+  },
+  {
+    "query": "임베딩 설정 오류를 502 에러로 변환하는 로직은?",
+    "expected_file": "services/code_indexing_service.py",
+    "expected_symbol": "index_project_code"
+  },
+  {
+    "query": "프로젝트 등록 시 root_path가 실제 디렉토리인지 검증하는 코드는?",
+    "expected_file": "services/project_service.py",
+    "expected_symbol": "create_project"
+  },
+  {
+    "query": "동일한 이름의 프로젝트가 이미 있으면 에러를 던지는 코드는?",
+    "expected_file": "services/project_service.py",
+    "expected_symbol": "create_project"
+  },
+  {
+    "query": "project_id로 프로젝트를 조회하고 없으면 404 에러를 내는 코드는?",
+    "expected_file": "services/project_service.py",
+    "expected_symbol": "get_project"
+  },
+  {
+    "query": "Mistral 임베딩과 OpenAI 임베딩 중 어떤 걸 쓸지 선택하는 로직은?",
+    "expected_file": "core/embeddings.py",
+    "expected_symbol": "get_embeddings"
+  },
+  {
+    "query": "임베딩 API 키가 하나도 설정되지 않았을 때 발생하는 예외는?",
+    "expected_file": "core/embeddings.py",
+    "expected_symbol": "EmbeddingConfigError"
+  },
+  {
+    "query": "공통 에러 응답을 JSON으로 만들어서 반환하는 함수는?",
+    "expected_file": "core/errors.py",
+    "expected_symbol": "service_error_response"
+  },
+  {
+    "query": "서비스 계층에서 공통으로 쓰는 에러 예외 클래스는?",
+    "expected_file": "core/errors.py",
+    "expected_symbol": "ServiceError"
+  },
+  {
+    "query": "Chroma code_chunks 컬렉션을 가져오는 코드는?",
+    "expected_file": "core/vector_store.py",
+    "expected_symbol": "get_code_vector_store"
+  },
+  {
+    "query": "환경변수에서 API 키와 DB 경로를 읽어오는 설정 클래스는?",
+    "expected_file": "core/config.py",
+    "expected_symbol": "Settings"
+  },
+  {
+    "query": "SQLAlchemy 엔진과 세션 팩토리를 만드는 코드는?",
+    "expected_file": "db/session.py",
+    "expected_symbol": "SessionLocal"
+  },
+  {
+    "query": "코드 파일을 1200자 단위로 쪼개는 로직은?",
+    "expected_file": "services/code_chunker.py",
+    "expected_symbol": "chunk_file_content"
+  },
+  {
+    "query": "chunk의 시작/끝 줄 번호를 계산하는 코드는?",
+    "expected_file": "services/code_chunker.py",
+    "expected_symbol": "chunk_file_content"
+  },
+  {
+    "query": "파일 경로와 언어 정보를 붙여서 임베딩용 텍스트를 만드는 함수는?",
+    "expected_file": "services/code_chunker.py",
+    "expected_symbol": "build_embedding_text"
+  },
+  {
+    "query": ".venv, __pycache__ 같은 디렉토리를 인덱싱에서 제외하는 코드는?",
+    "expected_file": "services/code_loader.py",
+    "expected_symbol": "iter_source_files"
+  },
+  {
+    "query": "지원하는 파일 확장자 목록은 어디 정의돼 있어?",
+    "expected_file": "services/code_loader.py",
+    "expected_symbol": "SUPPORTED_EXTENSIONS"
+  },
+  {
+    "query": "파일 확장자로 프로그래밍 언어를 판별하는 코드는?",
+    "expected_file": "services/code_loader.py",
+    "expected_symbol": "detect_language"
+  },
+  {
+    "query": "삭제된 파일의 document와 chunk, 벡터를 정리하는 코드는?",
+    "expected_file": "services/code_indexing_service.py",
+    "expected_symbol": "_delete_document"
+  },
+  {
+    "query": "재인덱싱할 때 새 벡터를 먼저 저장하고 기존 벡터를 나중에 지우는 코드는?",
+    "expected_file": "services/code_indexing_service.py",
+    "expected_symbol": "index_project_code"
+  },
+  {
+    "query": "파일 내용의 SHA256 해시를 계산하는 함수는?",
+    "expected_file": "services/code_indexing_service.py",
+    "expected_symbol": "_content_hash"
+  },
+  {
+    "query": "POST /api/index/code 엔드포인트 구현은 어디 있어?",
+    "expected_file": "api/index.py",
+    "expected_symbol": "index_code"
+  },
+  {
+    "query": "프로젝트 등록 API 엔드포인트는 어디 있어?",
+    "expected_file": "api/projects.py",
+    "expected_symbol": "register_project"
+  },
+  {
+    "query": "프로젝트 단건 조회 API 엔드포인트는?",
+    "expected_file": "api/projects.py",
+    "expected_symbol": "read_project"
+  },
+  {
+    "query": "헬스체크 API는 어디에 구현돼 있어?",
+    "expected_file": "api/health.py",
+    "expected_symbol": "get_health"
+  },
+  {
+    "query": "FastAPI 앱을 생성하고 라우터를 등록하는 코드는?",
+    "expected_file": "main.py",
+    "expected_symbol": "app"
+  },
+  {
+    "query": "서버 시작 시 SQLite 테이블을 생성하는 코드는?",
+    "expected_file": "main.py",
+    "expected_symbol": "Base.metadata.create_all"
+  },
+  {
+    "query": "공통 성공 응답과 요청 추적 ID 필드를 정의하는 스키마는?",
+    "expected_file": "schemas/common.py",
+    "expected_symbol": "SuccessResponse"
+  },
+  {
+    "query": "요청마다 request_id를 새로 생성하는 함수는?",
+    "expected_file": "schemas/common.py",
+    "expected_symbol": "new_request_id"
+  },
+  {
+    "query": "프로젝트 등록 요청 바디를 정의하는 스키마는?",
+    "expected_file": "schemas/project.py",
+    "expected_symbol": "ProjectCreate"
+  },
+  {
+    "query": "코드 인덱싱 요청에서 force_reindex 옵션을 받는 스키마는?",
+    "expected_file": "schemas/index.py",
+    "expected_symbol": "IndexCodeRequest"
+  },
+  {
+    "query": "projects 테이블의 컬럼을 정의한 SQLAlchemy 모델은?",
+    "expected_file": "models/project.py",
+    "expected_symbol": "Project"
+  },
+  {
+    "query": "documents 테이블에서 content_hash로 변경 여부를 감지하는 모델은?",
+    "expected_file": "models/document.py",
+    "expected_symbol": "Document"
+  },
+  {
+    "query": "chunk의 벡터 ID와 미리보기 텍스트를 저장하는 모델은?",
+    "expected_file": "models/chunk.py",
+    "expected_symbol": "Chunk"
+  }
+]
