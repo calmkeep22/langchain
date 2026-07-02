@@ -173,9 +173,9 @@ Summary: creates a camera, checks duplicate camera_id and stream_key, commits SQ
 
 ### 5.1 입력 대상
 
-초기 버전에서는 Markdown 파일을 공식문서 입력으로 사용합니다.
+공식문서 입력은 두 가지를 지원합니다.
 
-예시:
+1. 로컬 Markdown 파일
 
 ```text
 ./data/official_docs/fastapi_response.md
@@ -183,16 +183,26 @@ Summary: creates a camera, checks duplicate camera_id and stream_key, commits SQ
 ./data/official_docs/pydantic_model.md
 ```
 
+2. URL (웹페이지)
+
+```text
+https://fastapi.tiangolo.com/tutorial/response-model/
+```
+
+URL 입력 시 `RecursiveUrlLoader`로 페이지를 가져오며, `max_depth`(기본 2, 최대 3)만큼 링크를 따라 하위 페이지까지 함께 수집합니다. `prevent_outside=true`로 도메인 밖 이동을 막고, 시작 URL의 최상위 경로 segment(예: `/ko/`)로 `link_regex`를 제한해서 같은 도메인 안의 다른 섹션(다국어 문서의 `/en/`, `/de/` 등)까지 크롤링하는 것을 막습니다. css/js/이미지 등 정적 자산 URL은 제외하고, 한 번의 요청에서 최대 150페이지까지만 수집합니다 (대상 사이트 부하와 embedding API 비용을 제한하기 위함).
+
 ---
 
 ### 5.2 공식문서 chunking 전략
 
 공식문서는 문서 구조를 보존하는 것이 중요합니다.
 
-따라서 다음 순서로 분할합니다.
+URL로 가져온 HTML은 먼저 `<article>` 또는 `<main>` 태그로 본문 영역만 추출한 뒤(네비게이션, 사이드바, 배너 등 제외), `html2text`로 변환해 `<h1>~<h3>`를 `#`, `##`, `###` Markdown 헤더 문법으로 바꾸고, 로컬 Markdown 파일과 동일한 파이프라인을 탑니다. 두 태그 모두 없으면 페이지 전체를 사용합니다.
+
+코드 예제 안의 주석(예: `# Don't do this in production!`)이 실제 Markdown 헤더로 잘못 인식되지 않도록, `html2text`의 코드 블록을 ` ``` ` fenced code block으로 변환한 뒤 헤더 분할을 적용합니다 (`MarkdownHeaderTextSplitter`는 fenced code block 내부의 `#`는 헤더로 인식하지 않음).
 
 ```text
-Markdown 문서
+Markdown 문서 또는 URL(HTML → html2text 변환)
   ↓
 Header 기반 분할
   ↓
@@ -204,6 +214,8 @@ embedding
   ↓
 vector store 저장
 ```
+
+URL 크롤링으로 여러 페이지를 수집한 경우, 수집된 페이지 경로를 트리 구조 문자열(`page_tree`)로 만들어 응답과 `docs_indexing_completed` 로그에 남깁니다 (06-logging-policy.md 6.2 참고).
 
 ---
 

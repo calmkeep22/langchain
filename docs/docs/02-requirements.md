@@ -35,7 +35,8 @@
 
 사용자는 공식문서 또는 내부문서를 등록할 수 있어야 합니다.
 
-- 초기 입력 형식: Markdown 파일
+- 초기 입력 형식: Markdown 파일 또는 URL
+- URL 입력 시 같은 도메인 내에서 링크를 따라 하위 페이지까지 함께 수집할 수 있어야 합니다 (max_depth로 범위 제한, 도메인 밖으로는 이동하지 않음)
 - 문서 유형: official_doc, internal_doc, error_doc
 - 문서 출처와 제목을 metadata로 저장해야 합니다.
 
@@ -43,11 +44,13 @@
 
 ### FR-004. 공식문서 인덱싱
 
-시스템은 Markdown 문서를 구조 기반으로 분할하고 벡터 DB에 저장할 수 있어야 합니다.
+시스템은 Markdown 문서(또는 URL에서 가져온 문서)를 구조 기반으로 분할하고 벡터 DB에 저장할 수 있어야 합니다.
 
+- URL로 가져온 HTML은 헤더 구조(`<h1>~<h3>`)를 Markdown 헤더 문법으로 변환한 뒤 동일한 분할 전략을 적용합니다.
 - Markdown header 기반 분할을 우선 적용합니다.
 - 긴 section은 추가 text splitter로 재분할할 수 있습니다.
 - 각 chunk에는 source, title, section, chunk_index를 metadata로 저장해야 합니다.
+- URL 크롤링으로 여러 페이지를 수집한 경우, 수집된 페이지 목록을 트리 구조로 로그와 응답에 남겨야 합니다.
 
 ---
 

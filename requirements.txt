@@ -9,3 +9,6 @@ langchain-chroma
 langchain-text-splitters
 langchain-mistralai
 langchain-openai
+langchain-community
+beautifulsoup4
+html2text
