@@ -89,6 +89,7 @@ def index_project_code(
             document = existing_doc
 
         texts = [build_embedding_text(relative_path, language, c["text"]) for c in chunks]
+        vector_ids = [f"{document.id}-{c['chunk_index']}-{uuid.uuid4().hex[:8]}" for c in chunks]
         metadatas = [
             {
                 "source_type": "code",
@@ -98,10 +99,10 @@ def index_project_code(
                 "start_line": c["start_line"],
                 "end_line": c["end_line"],
                 "chunk_index": c["chunk_index"],
+                "vector_id": vector_id,
             }
-            for c in chunks
+            for c, vector_id in zip(chunks, vector_ids)
         ]
-        vector_ids = [f"{document.id}-{c['chunk_index']}-{uuid.uuid4().hex[:8]}" for c in chunks]
 
         try:
             vector_store.add_texts(texts=texts, metadatas=metadatas, ids=vector_ids)

@@ -103,6 +103,7 @@ def index_docs(
             document = existing_doc
 
         texts = [build_docs_embedding_text(doc_name, c) for c in chunks]
+        vector_ids = [f"{document.id}-{c['chunk_index']}-{uuid.uuid4().hex[:8]}" for c in chunks]
         metadatas = [
             {
                 key: value
@@ -114,12 +115,12 @@ def index_docs(
                     "h2": c.get("h2"),
                     "h3": c.get("h3"),
                     "chunk_index": c["chunk_index"],
+                    "vector_id": vector_id,
                 }.items()
                 if value is not None
             }
-            for c in chunks
+            for c, vector_id in zip(chunks, vector_ids)
         ]
-        vector_ids = [f"{document.id}-{c['chunk_index']}-{uuid.uuid4().hex[:8]}" for c in chunks]
 
         try:
             vector_store.add_texts(texts=texts, metadatas=metadatas, ids=vector_ids)
