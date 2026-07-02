@@ -11,6 +11,7 @@ Usage:
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -26,6 +27,14 @@ from app.services.code_indexing_service import index_project_code  # noqa: E402
 from app.services.project_service import create_project  # noqa: E402
 
 DATASET_PATH = REPO_ROOT / "eval" / "dataset.json"
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, int(len(ordered) * pct))
+    return ordered[index]
 
 
 def get_or_create_project(db, name: str, root_path: str) -> Project:
@@ -44,8 +53,10 @@ def evaluate(root: str, label: str, k: int, reindex: bool) -> dict:
     project = get_or_create_project(db, "eval-self-index", root)
 
     if reindex:
+        index_start = time.perf_counter()
         result = index_project_code(db, project.id, force_reindex=True)
-        print("indexed:", result)
+        index_latency_ms = round((time.perf_counter() - index_start) * 1000, 1)
+        print("indexed:", result, f"({index_latency_ms} ms)")
 
     embeddings = get_embeddings()
     vector_store = get_code_vector_store(embeddings)
@@ -56,10 +67,13 @@ def evaluate(root: str, label: str, k: int, reindex: bool) -> dict:
     hits_at_3 = 0
     hits_at_5 = 0
     reciprocal_ranks = []
+    latencies_ms = []
     rows = []
 
     for case in dataset:
+        search_start = time.perf_counter()
         results = vector_store.similarity_search(case["query"], k=k)
+        latencies_ms.append((time.perf_counter() - search_start) * 1000)
 
         ranked_files = []
         for doc in results:
@@ -98,6 +112,8 @@ def evaluate(root: str, label: str, k: int, reindex: bool) -> dict:
         "hit@3": round(hits_at_3 / n, 3),
         "recall@5": round(hits_at_5 / n, 3),
         "mrr": round(sum(reciprocal_ranks) / n, 3),
+        "avg_latency_ms": round(sum(latencies_ms) / n, 1),
+        "p95_latency_ms": round(_percentile(latencies_ms, 0.95), 1),
     }
 
     print(json.dumps(metrics, indent=2, ensure_ascii=False))
