@@ -1,0 +1,183 @@
+import time
+from enum import Enum
+
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.core.embeddings import EmbeddingConfigError, get_embeddings
+from app.core.errors import ServiceError
+from app.core.llm import LLMConfigError, get_llm
+from app.core.vector_store import get_code_vector_store, get_docs_vector_store
+from app.models.review import Review
+from app.services.project_service import get_project
+
+PROMPT_TEMPLATE = """너는 백엔드 코드 리뷰어다.
+반드시 제공된 코드와 공식문서에 근거해서 답변해라.
+근거가 부족하면 추측하지 말고 "근거 부족"이라고 말해라.
+
+[사용자 질문]
+{question}
+
+[관련 코드]
+{code_context}
+
+[관련 공식문서]
+{doc_context}
+
+[답변 형식]
+1. 결론
+2. 관련 코드 위치
+3. 공식문서 근거
+4. 문제 설명
+5. 수정 방향
+6. 수정 예시
+"""
+
+
+class Verdict(str, Enum):
+    OK = "OK"
+    PROBLEM = "PROBLEM"
+    NEEDS_IMPROVEMENT = "NEEDS_IMPROVEMENT"
+    INSUFFICIENT_CONTEXT = "INSUFFICIENT_CONTEXT"
+
+
+class ReviewAnswer(BaseModel):
+    verdict: Verdict = Field(description="이 질문/코드에 대한 종합 판단")
+    answer: str = Field(
+        description="결론, 관련 코드 위치, 공식문서 근거, 문제 설명, 수정 방향, 수정 예시를 포함한 한국어 답변 전문"
+    )
+
+
+def _build_code_context(results: list[tuple]) -> tuple[str, list[dict]]:
+    if not results:
+        return "(검색된 코드 없음)", []
+
+    blocks = []
+    related_code = []
+    for doc, score in results:
+        meta = doc.metadata
+        file_path = meta.get("file_path")
+        start_line = meta.get("start_line")
+        end_line = meta.get("end_line")
+        blocks.append(f"File: {file_path} (L{start_line}-{end_line})\n{doc.page_content}")
+        related_code.append(
+            {
+                "file_path": file_path,
+                "symbol_name": meta.get("symbol_name"),
+                "start_line": start_line,
+                "end_line": end_line,
+                "score": round(score, 4),
+            }
+        )
+    return "\n\n---\n\n".join(blocks), related_code
+
+
+def _build_doc_context(results: list[tuple]) -> tuple[str, list[dict]]:
+    if not results:
+        return "(검색된 공식문서 없음)", []
+
+    blocks = []
+    official_references = []
+    for doc, score in results:
+        meta = doc.metadata
+        headers = [h for h in (meta.get("h1"), meta.get("h2"), meta.get("h3")) if h]
+        section = " > ".join(headers)
+        title = headers[-1] if headers else meta.get("doc_name")
+        blocks.append(f"Document: {meta.get('doc_name')}\nSection: {section}\n\n{doc.page_content}")
+        official_references.append(
+            {
+                "title": title,
+                "source": meta.get("source"),
+                "section": section,
+                "score": round(score, 4),
+            }
+        )
+    return "\n\n---\n\n".join(blocks), official_references
+
+
+def create_review(
+    db: Session,
+    project_id: int,
+    question: str,
+    code_top_k: int = 5,
+    doc_top_k: int = 5,
+    embeddings=None,
+    llm=None,
+) -> dict:
+    if not question or not question.strip():
+        raise ServiceError("EMPTY_QUESTION", "Question must not be empty.", 400)
+
+    project = get_project(db, project_id)
+
+    if embeddings is None:
+        try:
+            embeddings = get_embeddings()
+        except EmbeddingConfigError as exc:
+            raise ServiceError("EMBEDDING_FAILED", str(exc), 502) from exc
+
+    start = time.perf_counter()
+
+    try:
+        code_results = get_code_vector_store(embeddings).similarity_search_with_score(
+            question, k=code_top_k, filter={"project_id": project.id}
+        )
+        doc_results = get_docs_vector_store(embeddings).similarity_search_with_score(
+            question, k=doc_top_k
+        )
+    except Exception as exc:
+        raise ServiceError("RETRIEVAL_FAILED", "Vector search failed.", 500) from exc
+
+    if not code_results and not doc_results:
+        raise ServiceError(
+            "NO_RELEVANT_CONTEXT", "No relevant code or documentation found.", 422
+        )
+
+    code_context, related_code = _build_code_context(code_results)
+    doc_context, official_references = _build_doc_context(doc_results)
+
+    if llm is None:
+        try:
+            llm = get_llm()
+        except LLMConfigError as exc:
+            raise ServiceError("LLM_API_KEY_MISSING", str(exc), 500) from exc
+
+    prompt = PROMPT_TEMPLATE.format(
+        question=question, code_context=code_context, doc_context=doc_context
+    )
+
+    try:
+        result: ReviewAnswer = llm.with_structured_output(ReviewAnswer).invoke(prompt)
+    except Exception as exc:
+        raise ServiceError("LLM_CALL_FAILED", "LLM API request failed.", 502) from exc
+
+    latency_ms = int((time.perf_counter() - start) * 1000)
+    model_name = getattr(llm, "model", None) or getattr(llm, "model_name", None)
+
+    review = Review(
+        project_id=project.id,
+        question=question,
+        answer=result.answer,
+        verdict=result.verdict.value,
+        model_name=model_name,
+        latency_ms=latency_ms,
+    )
+    db.add(review)
+    db.commit()
+    db.refresh(review)
+
+    return {
+        "review_id": review.id,
+        "verdict": review.verdict,
+        "answer": review.answer,
+        "related_code": related_code,
+        "official_references": official_references,
+        "model": model_name,
+        "latency_ms": latency_ms,
+    }
+
+
+def get_review(db: Session, review_id: int) -> Review:
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise ServiceError("REVIEW_NOT_FOUND", "Review not found.", 404)
+    return review
