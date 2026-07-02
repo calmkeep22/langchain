@@ -1,11 +1,13 @@
 import hashlib
 import json
+import time
 import uuid
 
 from sqlalchemy.orm import Session
 
 from app.core.embeddings import EmbeddingConfigError, get_embeddings
 from app.core.errors import ServiceError
+from app.core.logging import log_event
 from app.core.vector_store import get_code_vector_store
 from app.models.chunk import Chunk
 from app.models.document import Document
@@ -32,6 +34,7 @@ def index_project_code(
     db: Session, project_id: int, force_reindex: bool = False, embeddings=None
 ) -> dict:
     project = get_project(db, project_id)
+    start = time.perf_counter()
 
     if embeddings is None:
         try:
@@ -143,6 +146,17 @@ def index_project_code(
         _delete_document(db, vector_store, document)
 
     db.commit()
+
+    latency_ms = int((time.perf_counter() - start) * 1000)
+    log_event(
+        "code_indexing_completed",
+        project_id=project.id,
+        indexed_files=indexed_files,
+        indexed_chunks=indexed_chunks,
+        skipped_files=skipped_files,
+        deleted_files=len(stale_documents),
+        latency_ms=latency_ms,
+    )
 
     return {
         "project_id": project.id,

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.schemas.common import SuccessResponse, new_request_id
+from app.schemas.common import SuccessResponse, current_request_id
 
 router = APIRouter()
 
@@ -9,5 +9,5 @@ router = APIRouter()
 def get_health() -> SuccessResponse:
     return SuccessResponse(
         data={"status": "UP", "service": "rag-code-reviewer"},
-        request_id=new_request_id(),
+        request_id=current_request_id(),
     )
