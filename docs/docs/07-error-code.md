@@ -93,16 +93,31 @@
 | DOCUMENT_NOT_FOUND | 404 | 등록된 문서를 찾을 수 없음 |
 | UNSUPPORTED_FILE_TYPE | 400 | 지원하지 않는 파일 형식 |
 | EMPTY_DOCUMENT | 400 | 문서 내용이 비어 있음 |
+| DOCUMENT_FETCH_FAILED | 502 | URL에서 문서를 가져오는 데 실패함 |
 
 ### UNSUPPORTED_FILE_TYPE
 
-초기 버전에서 공식문서는 Markdown만 지원합니다.
+초기 버전에서 공식문서는 Markdown 파일 또는 URL을 지원합니다.
 
 지원 형식:
 
 ```text
 .md
+http(s):// URL
 ```
+
+### DOCUMENT_FETCH_FAILED
+
+발생 조건:
+
+- URL 응답이 4xx/5xx인 경우
+- 요청 타임아웃
+- 네트워크 오류
+
+대응 방법:
+
+- URL이 실제로 접근 가능한지 확인
+- 타임아웃/재시도 정책 검토
 
 ---
 

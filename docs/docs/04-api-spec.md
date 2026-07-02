@@ -178,7 +178,9 @@
 
 공식문서 또는 내부문서를 인덱싱합니다.
 
-#### Request
+`path`(로컬 Markdown 파일) 또는 `url`(웹페이지) 중 하나를 전달합니다. 둘 다 전달하거나 둘 다 비어있으면 `INVALID_REQUEST`를 반환합니다.
+
+#### Request (로컬 파일)
 
 ```json
 {
@@ -188,20 +190,37 @@
 }
 ```
 
+#### Request (URL)
+
+```json
+{
+  "doc_name": "fastapi-response-docs",
+  "source_type": "official_doc",
+  "url": "https://fastapi.tiangolo.com/tutorial/response-model/",
+  "max_depth": 2
+}
+```
+
+`max_depth`는 선택값이며 기본값 2, 최대 3까지 허용합니다. 1이면 해당 페이지만, 2 이상이면 시작 URL의 최상위 경로 segment(예: `/ko/`) 하위의 링크를 따라 하위 페이지까지 함께 수집합니다 (`prevent_outside=true`로 도메인 밖 이동 차단 + 최상위 경로 segment로 제한해 다국어 문서 사이트 등에서 `/en/`, `/de/` 같은 다른 섹션까지 새는 것을 방지, css/js/이미지 등 정적 자산은 제외). 한 번의 요청에서 최대 150페이지까지만 수집합니다.
+
 #### Response
 
 ```json
 {
   "success": true,
   "data": {
-    "document_id": 3,
     "doc_name": "fastapi-response-docs",
-    "indexed_chunks": 18,
-    "status": "COMPLETED"
+    "indexed_documents": 3,
+    "indexed_chunks": 42,
+    "skipped_documents": 0,
+    "status": "COMPLETED",
+    "page_tree": "fastapi.tiangolo.com\n└── tutorial/\n    └── response-model/\n        ├── extra-models/\n        └── response-multiple-models/"
   },
   "request_id": "req_abc123"
 }
 ```
+
+URL 크롤링으로 여러 페이지가 수집된 경우 `indexed_documents`는 페이지 수를 나타내고, `page_tree`에 수집된 페이지 경로를 트리 형태 문자열로 표시합니다. 로컬 파일(`path`) 인덱싱이거나 단일 페이지(`max_depth=1`)인 경우 `page_tree`는 `null`입니다.
 
 #### Errors
 
@@ -209,6 +228,7 @@
 |---|---:|---|
 | DOCUMENT_PATH_NOT_FOUND | 400 | 문서 경로가 존재하지 않음 |
 | UNSUPPORTED_FILE_TYPE | 400 | 지원하지 않는 문서 형식 |
+| DOCUMENT_FETCH_FAILED | 502 | URL에서 문서를 가져오는 데 실패함 |
 | INDEXING_FAILED | 500 | 문서 인덱싱 실패 |
 | EMBEDDING_FAILED | 502 | Embedding API 호출 실패 |
 

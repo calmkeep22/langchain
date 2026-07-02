@@ -233,13 +233,16 @@ docs_indexing_completed
   "level": "INFO",
   "event": "docs_indexing_completed",
   "request_id": "req_abc123",
-  "document_id": 3,
   "doc_name": "fastapi-response-docs",
-  "indexed_chunks": 18,
+  "indexed_documents": 3,
+  "indexed_chunks": 42,
+  "page_tree": "fastapi.tiangolo.com\n└── tutorial/\n    └── response-model/\n        ├── extra-models/\n        └── response-multiple-models/",
   "latency_ms": 1200,
   "timestamp": "2026-07-01T12:06:00"
 }
 ```
+
+`page_tree`는 URL 기반 인덱싱으로 여러 페이지를 수집했을 때만 채워지며, 어떤 페이지들이 실제로 수집됐는지 한눈에 확인하기 위한 필드다.
 
 ---
 
