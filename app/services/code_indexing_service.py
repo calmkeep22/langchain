@@ -18,6 +18,16 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def _delete_document(db: Session, vector_store, document: Document) -> None:
+    chunks = db.query(Chunk).filter(Chunk.document_id == document.id).all()
+    vector_ids = [c.vector_id for c in chunks]
+    if vector_ids:
+        vector_store.delete(ids=vector_ids)
+    for chunk in chunks:
+        db.delete(chunk)
+    db.delete(document)
+
+
 def index_project_code(
     db: Session, project_id: int, force_reindex: bool = False, embeddings=None
 ) -> dict:
@@ -34,6 +44,7 @@ def index_project_code(
     indexed_files = 0
     indexed_chunks = 0
     skipped_files = 0
+    seen_paths: set[str] = set()
 
     for file_path in iter_source_files(project.root_path):
         content = read_file(file_path)
@@ -42,6 +53,7 @@ def index_project_code(
             continue
 
         relative_path = str(file_path.relative_to(project.root_path)).replace("\\", "/")
+        seen_paths.add(relative_path)
         content_hash = _content_hash(content)
 
         existing_doc = (
@@ -53,16 +65,14 @@ def index_project_code(
             skipped_files += 1
             continue
 
-        if existing_doc:
-            old_chunks = db.query(Chunk).filter(Chunk.document_id == existing_doc.id).all()
-            old_vector_ids = [c.vector_id for c in old_chunks]
-            if old_vector_ids:
-                vector_store.delete(ids=old_vector_ids)
-            for c in old_chunks:
-                db.delete(c)
-            document = existing_doc
-            document.content_hash = content_hash
-        else:
+        language = detect_language(file_path)
+        chunks = chunk_file_content(content)
+        if not chunks:
+            skipped_files += 1
+            continue
+
+        is_new_document = existing_doc is None
+        if is_new_document:
             document = Document(
                 project_id=project.id,
                 source_type="code",
@@ -72,12 +82,8 @@ def index_project_code(
             )
             db.add(document)
             db.flush()
-
-        language = detect_language(file_path)
-        chunks = chunk_file_content(content)
-        if not chunks:
-            skipped_files += 1
-            continue
+        else:
+            document = existing_doc
 
         texts = [build_embedding_text(relative_path, language, c["text"]) for c in chunks]
         metadatas = [
@@ -97,7 +103,21 @@ def index_project_code(
         try:
             vector_store.add_texts(texts=texts, metadatas=metadatas, ids=vector_ids)
         except Exception as exc:
+            if is_new_document:
+                db.delete(document)
+                db.flush()
             raise ServiceError("EMBEDDING_FAILED", "Embedding API request failed.", 502) from exc
+
+        # New vectors are stored successfully before touching the old ones, so a failed
+        # embedding call above never leaves this file without searchable chunks.
+        if not is_new_document:
+            old_chunks = db.query(Chunk).filter(Chunk.document_id == document.id).all()
+            old_vector_ids = [c.vector_id for c in old_chunks]
+            if old_vector_ids:
+                vector_store.delete(ids=old_vector_ids)
+            for c in old_chunks:
+                db.delete(c)
+            document.content_hash = content_hash
 
         for c, meta, vector_id in zip(chunks, metadatas, vector_ids):
             db.add(
@@ -113,6 +133,15 @@ def index_project_code(
         indexed_files += 1
         indexed_chunks += len(chunks)
 
+    stale_query = db.query(Document).filter(
+        Document.project_id == project.id, Document.source_type == "code"
+    )
+    if seen_paths:
+        stale_query = stale_query.filter(~Document.path.in_(seen_paths))
+    stale_documents = stale_query.all()
+    for document in stale_documents:
+        _delete_document(db, vector_store, document)
+
     db.commit()
 
     return {
@@ -120,5 +149,6 @@ def index_project_code(
         "indexed_files": indexed_files,
         "indexed_chunks": indexed_chunks,
         "skipped_files": skipped_files,
+        "deleted_files": len(stale_documents),
         "status": "COMPLETED",
     }

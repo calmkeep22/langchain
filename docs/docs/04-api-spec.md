@@ -157,6 +157,7 @@
     "indexed_files": 24,
     "indexed_chunks": 132,
     "skipped_files": 5,
+    "deleted_files": 2,
     "status": "COMPLETED"
   },
   "request_id": "req_abc123"
