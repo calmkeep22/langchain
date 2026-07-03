@@ -26,8 +26,8 @@
 
 - 초기 지원 확장자: `.py`, `.md`, `.yml`, `.yaml`, `.json`, `.env.example`
 - 제외 디렉토리: `.git`, `.venv`, `venv`, `__pycache__`, `node_modules`, `dist`, `build`, `target`
-- 초기 chunk 단위: 파일 단위 또는 단순 text chunk
-- 향후 확장: 함수/클래스/메서드 단위 chunking
+- `.py` 파일은 AST 기반 함수/메서드 단위 chunking (구문 오류 시 파일 단위로 대체)
+- 그 외 파일은 파일 단위 chunking
 
 ---
 

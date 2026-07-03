@@ -11,7 +11,7 @@ from app.core.logging import log_event
 from app.core.vector_store import get_code_vector_store
 from app.models.chunk import Chunk
 from app.models.document import Document
-from app.services.code_chunker import build_embedding_text, chunk_file_content
+from app.services.code_chunker import build_embedding_text, chunk_file_content, chunk_python_ast
 from app.services.code_loader import detect_language, iter_source_files, read_file
 from app.services.project_service import get_project
 
@@ -69,7 +69,9 @@ def index_project_code(
             continue
 
         language = detect_language(file_path)
-        chunks = chunk_file_content(content)
+        chunks = chunk_python_ast(content) if language == "python" else None
+        if chunks is None:
+            chunks = chunk_file_content(content)
         if not chunks:
             skipped_files += 1
             continue
@@ -88,18 +90,37 @@ def index_project_code(
         else:
             document = existing_doc
 
-        texts = [build_embedding_text(relative_path, language, c["text"]) for c in chunks]
+        texts = [
+            build_embedding_text(
+                relative_path,
+                language,
+                c["text"],
+                chunk_type=c.get("chunk_type"),
+                symbol_name=c.get("symbol_name"),
+                parent_symbol=c.get("parent_symbol"),
+            )
+            for c in chunks
+        ]
         vector_ids = [f"{document.id}-{c['chunk_index']}-{uuid.uuid4().hex[:8]}" for c in chunks]
         metadatas = [
             {
-                "source_type": "code",
-                "project_id": project.id,
-                "file_path": relative_path,
-                "language": language,
-                "start_line": c["start_line"],
-                "end_line": c["end_line"],
-                "chunk_index": c["chunk_index"],
-                "vector_id": vector_id,
+                key: value
+                for key, value in {
+                    "source_type": "code",
+                    "project_id": project.id,
+                    "file_path": relative_path,
+                    "language": language,
+                    "start_line": c["start_line"],
+                    "end_line": c["end_line"],
+                    "chunk_index": c["chunk_index"],
+                    "chunk_type": c.get("chunk_type"),
+                    "symbol_name": c.get("symbol_name"),
+                    "parent_symbol": c.get("parent_symbol"),
+                    "parent_start_line": c.get("parent_start_line"),
+                    "parent_end_line": c.get("parent_end_line"),
+                    "vector_id": vector_id,
+                }.items()
+                if value is not None
             }
             for c, vector_id in zip(chunks, vector_ids)
         ]

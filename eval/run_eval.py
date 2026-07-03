@@ -4,8 +4,15 @@ Indexes a codebase (defaults to this repo's app/ folder) and measures
 Hit@1, Hit@3, Recall@5, and MRR of the code retriever against
 eval/dataset.json. Requires a real embedding API key in .env.
 
+The dataset scores at file granularity, but a chunking strategy that
+produces more chunks per file (e.g. AST-based function/method chunking)
+can fill up a small raw top-k with several chunks from the same file,
+crowding out other files. To score fairly regardless of chunks-per-file,
+this pulls a wider raw candidate pool (``--search-k``, default 20) and
+only then dedupes down to a per-file ranking before computing Hit@k/MRR.
+
 Usage:
-    python eval/run_eval.py [--root PATH] [--label V1] [--k 5] [--no-reindex]
+    python eval/run_eval.py [--root PATH] [--label V1] [--k 5] [--search-k 20] [--no-reindex]
 """
 
 import argparse
@@ -46,7 +53,7 @@ def get_or_create_project(db, name: str, root_path: str) -> Project:
     return db.query(Project).filter(Project.name == name).first()
 
 
-def evaluate(root: str, label: str, k: int, reindex: bool) -> dict:
+def evaluate(root: str, label: str, k: int, reindex: bool, search_k: int) -> dict:
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
 
@@ -72,7 +79,7 @@ def evaluate(root: str, label: str, k: int, reindex: bool) -> dict:
 
     for case in dataset:
         search_start = time.perf_counter()
-        results = vector_store.similarity_search(case["query"], k=k)
+        results = vector_store.similarity_search(case["query"], k=search_k)
         latencies_ms.append((time.perf_counter() - search_start) * 1000)
 
         ranked_files = []
@@ -131,10 +138,17 @@ def main() -> None:
     parser.add_argument("--root", default=str(REPO_ROOT / "app"))
     parser.add_argument("--label", default="V1")
     parser.add_argument("--k", type=int, default=5)
+    parser.add_argument("--search-k", type=int, default=20)
     parser.add_argument("--no-reindex", action="store_true")
     args = parser.parse_args()
 
-    evaluate(root=args.root, label=args.label, k=args.k, reindex=not args.no_reindex)
+    evaluate(
+        root=args.root,
+        label=args.label,
+        k=args.k,
+        reindex=not args.no_reindex,
+        search_k=args.search_k,
+    )
 
 
 if __name__ == "__main__":
