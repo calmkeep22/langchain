@@ -323,11 +323,13 @@ Dense 검색 (Top-20)      BM25 검색 (Top-20, SQLite FTS5)
 
 | 질의 유형 | 판단 기준 | 조정 내용 |
 |---|---|---|
-| `symbol` | 함수 호출(`foo(`), `Class.method`, `ALL_CAPS_CONST`, `snake_case` 식별자를 포함 | `sparse_weight=2.0` (BM25 키워드 매칭을 dense보다 더 신뢰) |
+| `symbol` | 함수 호출(`foo(`), `Class.method`, `ALL_CAPS_CONST`, `snake_case` 식별자를 포함 | `top_k`는 그대로, 가중치도 기본값 유지 (아래 참고) |
 | `architecture` | "흐름", "구조", "아키텍처", "전체" 등 키워드 포함 | `top_k=top_k*2` (여러 파일에 걸친 근거가 필요) |
 | `natural_language` | 위 두 조건에 해당하지 않는 일반 질문 (기본값) | 기존과 동일 (`dense_weight=sparse_weight=1.0`) |
 
 `eval/dataset.json` 35개 질문 기준 분류 결과는 자연어 33개, symbol 2개(`code_chunks`, `force_reindex`처럼 실제 식별자를 지목한 질문)로, symbol 오탐은 거의 없다. 대부분의 질문이 `natural_language`로 분류되므로 기존 검색 품질에는 영향이 없다 (`eval/results.md` V6 참고).
+
+**symbol 질의의 `sparse_weight`는 애초 설계(2.0)와 달리 1.0으로 유지한다.** 식별자가 자연스러운 한국어 문장 안에 조사와 함께 섞여 있으면("response_model이랑 ... 차이가 뭐야?"), 조사/의문사 토큰이 BM25 IDF상 오히려 식별자보다 높은 점수를 받아 `sparse_weight`를 올릴수록 결과가 나빠진다 (`eval/results.md` V7, #29 참고). 제대로 고치려면 형태소 분석 기반 토크나이징이 필요해 별도 과제로 남겨뒀다.
 
 ---
 

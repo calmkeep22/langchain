@@ -41,13 +41,17 @@ def classify_query(question: str) -> QueryType:
 def routing_params(query_type: QueryType) -> dict:
     """How each query type should adjust the hybrid search call.
 
-    SYMBOL: trust exact keyword matches (BM25) more than embedding
-    similarity, since the user is naming something specific.
+    SYMBOL: sparse_weight is kept at 1.0 (not boosted) for now. Boosting BM25
+    for symbol queries backfires when the identifier is embedded in a casual
+    Korean question (e.g. "response_model이랑 ... 차이가 뭐야?") -- particles
+    and question words like "차이가"/"뭐야" survive tokenization as whole
+    tokens and out-rank the real identifier by BM25 IDF (see #29). Revisit
+    once BM25 tokenization does proper Korean morphological analysis.
     ARCHITECTURE: widen retrieval since a flow/structure question usually
     needs evidence from more than a couple of chunks.
     """
     if query_type == QueryType.SYMBOL:
-        return {"dense_weight": 1.0, "sparse_weight": 2.0, "top_k_multiplier": 1}
+        return {"dense_weight": 1.0, "sparse_weight": 1.0, "top_k_multiplier": 1}
     if query_type == QueryType.ARCHITECTURE:
         return {"dense_weight": 1.0, "sparse_weight": 1.0, "top_k_multiplier": 2}
     return {"dense_weight": 1.0, "sparse_weight": 1.0, "top_k_multiplier": 1}

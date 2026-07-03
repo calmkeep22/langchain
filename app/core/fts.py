@@ -5,7 +5,11 @@ from sqlalchemy.orm import Session
 
 from app.db.session import engine
 
-_TOKEN_RE = re.compile(r"[\w가-힣]+")
+# Two alternatives instead of one [\w가-힣]+ class: Python's \w already
+# matches Hangul, so a single class glues a Korean particle directly onto a
+# preceding identifier (e.g. "response_model이랑" -> one unmatchable token).
+# Splitting per script keeps "response_model" searchable on its own.
+_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[가-힣]+")
 
 
 def ensure_fts_table() -> None:
