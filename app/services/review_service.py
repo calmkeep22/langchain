@@ -18,6 +18,8 @@ from app.services.query_router import classify_query, routing_params
 PROMPT_TEMPLATE = """너는 백엔드 코드 리뷰어다.
 반드시 제공된 코드와 공식문서에 근거해서 답변해라.
 근거가 부족하면 추측하지 말고 "근거 부족"이라고 말해라.
+공식문서를 인용할 때는 [관련 공식문서]에 적힌 URL을 한 글자도 바꾸지 말고 그대로 사용해라.
+[관련 공식문서]에 없는 URL은 알고 있더라도 답변에 쓰지 마라.
 
 [사용자 질문]
 {question}
@@ -107,7 +109,10 @@ def _build_doc_context(items: list[dict]) -> tuple[str, list[dict]]:
         headers = [h for h in (meta.get("h1"), meta.get("h2"), meta.get("h3")) if h]
         section = " > ".join(headers)
         title = headers[-1] if headers else meta.get("doc_name")
-        blocks.append(f"Document: {meta.get('doc_name')}\nSection: {section}\n\n{item['text']}")
+        blocks.append(
+            f"Document: {meta.get('doc_name')}\nURL: {meta.get('source')}\n"
+            f"Section: {section}\n\n{item['text']}"
+        )
         official_references.append(
             {
                 "title": title,

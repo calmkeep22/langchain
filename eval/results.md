@@ -158,12 +158,43 @@ RRF 순위 리스트에서 같은 파일의 chunk가 후보 풀(`RERANK_POOL=20`
 지표 동일 (MRR 0.001 차이는 반올림). 이 eval 세트로는 라우팅 자체의 효과를 측정할 수 없으므로 — symbol 질문 2개뿐이고 architecture 질문은 0개 — 분류 결과와 파라미터 변화를 직접 확인했다.
 
 ```text
-"force_reindex 옵션은 어디서 처리해?"        → symbol            (sparse_weight=2.0)
+"force_reindex 옵션은 어디서 처리해?"        → symbol            (sparse_weight=2.0, V7에서 1.0으로 변경됨 — 아래 참고)
 "코드 인덱싱 전체 흐름 설명해줘"              → architecture      (top_k_multiplier=2)
 "임베딩 API 키가 없을 때 발생하는 예외는?"    → natural_language  (기본값 그대로)
 ```
 
 symbol 분류 정규식에서 `API`, `POST`, `JSON` 같은 일반 약어가 `ALL_CAPS` 패턴에 걸려 오탐되는 문제가 있었다 (35개 중 8개가 symbol로 잘못 분류됨). 패턴에 언더스코어(`_`)를 필수로 요구하도록 수정해 오탐을 2개로 줄였다 (`code_chunks`, `force_reindex`처럼 실제 식별자를 지목한 정상 케이스만 남음).
+
+---
+
+## V7: BM25 토크나이저 버그 수정 및 symbol 가중치 원복 (#29)
+
+실사용 테스트 중 `"response_model이랑 response_class 차이가 뭐야?"` 질문에서 실제로 인덱싱된 `tutorial/response-model/` 문서가 전혀 검색되지 않고, LLM이 검색 결과에도 없는 출처(`.../advanced/custom-response/#response-class`)를 답변에 지어내는 사례를 발견했다.
+
+**원인 1 — 토큰 뭉침 버그**: `app/core/fts.py`의 토큰 정규식 `[\w가-힣]+`는 Python 정규식에서 `\w`가 한글도 포함하기 때문에, 영어 식별자에 조사가 공백 없이 붙으면(`response_model이랑`) 하나의 토큰으로 뭉쳐 실제 문서에 없는 검색어가 돼버린다. `[A-Za-z0-9_]+|[가-힣]+`로 스크립트 경계에서 분리하도록 수정했다.
+
+**원인 2 — symbol 라우팅의 부작용**: 토크나이저를 고쳐도 이 질문은 여전히 실패했다. 원인은 `이랑`/`차이가`/`뭐야` 같은 조사·의문사 토큰이 코퍼스 전체에서 희귀해서 BM25 IDF상 `response_model`보다 더 높은 점수를 받기 때문이다. Query Router가 이 질문을 `symbol`로 분류해 `sparse_weight=2.0`을 적용하면서 이 노이즈가 오히려 증폭됐다.
+
+| 가중치 | 검색 결과 (공식문서 top-5) |
+|---|---|
+| `sparse_weight=1.0` (라우팅 없음 가정) | async, **response-model**, reference, **response-model**, reference — 근처에 있음 |
+| `sparse_weight=2.0` (V6 symbol 라우팅) | async, reference, reference, apirouter, apirouter — response-model 탈락 |
+| `sparse_weight=1.0` (V7, symbol 원복 후) | async, **response-model**, reference, **response-model**, reference — 라우팅 없음과 동일 |
+
+한국어 조사를 제대로 떼어내려면 형태소 분석기가 필요해 이번 범위를 벗어난다고 판단해, symbol 질의의 `sparse_weight`를 1.0으로 되돌려 당장의 역효과만 제거했다.
+
+| Version | Hit@1 | Hit@3 | Recall@5 | MRR |
+|---|---|---|---|---|
+| V6 (symbol sparse_weight=2.0) | 0.714 | 0.886 | 0.971 | 0.822 |
+| V7 (토크나이저 수정 + symbol sparse_weight=1.0) | 0.714 | 0.914 | 0.971 | 0.820 |
+
+코드 검색 eval 지표 기준으로는 회귀 없음 (오히려 Hit@3 소폭 개선, MRR 차이는 반올림 오차 수준). 형태소 분석 기반 토크나이징은 후속 과제로 남겨둔다.
+
+**원인 3 — LLM이 근거 없는 출처를 지어냄**: 검색 자체를 고친 뒤에도, `_build_doc_context()`가 LLM 컨텍스트에 `doc_name`과 섹션 제목만 넣고 **실제 URL(`source`)을 아예 포함하지 않았다는 사실**을 발견했다. LLM은 URL을 본 적이 없으니 FastAPI 문서 구조에 대한 자기 지식으로 그럴듯한 URL을 재구성했고, 그 결과 실제로 검색되지 않은 페이지(`custom-response`)를 근거인 것처럼 인용하거나, 검색된 URL의 경로를 미묘하게 틀리게(`/tutorial/` 누락) 답변에 적었다.
+
+수정: `_build_doc_context()`의 컨텍스트 블록에 `URL: {source}` 줄을 추가하고, `PROMPT_TEMPLATE`에 "URL은 [관련 공식문서]에 적힌 그대로 사용하고, 없는 URL은 쓰지 마라"는 지시를 추가했다. 수정 후 같은 질문으로 재검증한 결과, 답변에 인용된 URL이 `official_references`에 실제로 있는 URL과 정확히 일치했다(섹션 앵커 `#...`만 추가된 정도는 같은 페이지를 가리키므로 문제 없음).
+
+**참고 — RRF 점수 스케일에 대한 오해 방지**: 위 검증 과정에서 `related_code`/`official_references`의 `score`가 0.015~0.03 정도로 낮게 나오는 것을 보고 "유사도가 낮은 것 아니냐"는 질문이 나왔는데, 이 값은 코사인 유사도가 아니라 RRF 점수(`weight / (k + rank)`, `k=60`)다. 한쪽 검색에서만 1등을 해도 최대 `1/61 ≈ 0.0164`이므로 이 스케일이 정상이며, 실제 관련성과 직접 비례하지 않는다 (V3 참고).
 
 ---
 
