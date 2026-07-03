@@ -3,19 +3,28 @@ import json
 from sqlalchemy.orm import Session
 
 from app.core.fts import get_fts_content, search_fts
+from app.core.reranker import rerank
 from app.core.vector_store import get_code_vector_store, get_docs_vector_store
 from app.models.chunk import Chunk
 
 RRF_K = 60
 DENSE_K = 20
 SPARSE_K = 20
+RERANK_POOL = 20
+
+# use_reranking defaults to False: both FlashRank models tested
+# (ms-marco-TinyBERT-L-2-v2, ms-marco-MiniLM-L-12-v2) made results
+# substantially worse on this repo's Korean-question / English-code +
+# Korean-docstring corpus (MRR 0.86 -> 0.29 / 0.41), not better -- see
+# eval/results.md "V4: Reranking (#15)" for the measurements. The
+# plumbing is kept so a better-suited reranker can be swapped in later.
 
 
 def reciprocal_rank_fusion(rank_lists: list[list[int]], k: int = RRF_K) -> dict[int, float]:
     scores: dict[int, float] = {}
     for ranked_ids in rank_lists:
-        for rank, chunk_id in enumerate(ranked_ids, start=1):
-            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (k + rank)
+        for rank_position, chunk_id in enumerate(ranked_ids, start=1):
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (k + rank_position)
     return scores
 
 
@@ -35,6 +44,7 @@ def _hybrid_search(
     project_id: int | None = None,
     source_type: str | None = None,
     rrf_k: int = RRF_K,
+    use_reranking: bool = False,
 ) -> list[dict]:
     dense_filter = {"project_id": project_id} if project_id is not None else None
     dense_results = vector_store.similarity_search_with_score(
@@ -77,23 +87,54 @@ def _hybrid_search(
     rrf_scores = reciprocal_rank_fusion([dense_rank_ids, sparse_rank_ids], k=rrf_k)
     ranked_ids = sorted(combined.keys(), key=lambda cid: rrf_scores.get(cid, 0.0), reverse=True)
 
-    return [
+    candidates = [
         {**combined[chunk_id], "score": round(rrf_scores.get(chunk_id, 0.0), 5)}
-        for chunk_id in ranked_ids[:top_k]
+        for chunk_id in ranked_ids[:RERANK_POOL]
     ]
+
+    if not use_reranking:
+        return candidates[:top_k]
+
+    return rerank(question, candidates, top_k)
 
 
 def hybrid_search_code(
-    db: Session, embeddings, question: str, project_id: int, top_k: int = 5, rrf_k: int = RRF_K
+    db: Session,
+    embeddings,
+    question: str,
+    project_id: int,
+    top_k: int = 5,
+    rrf_k: int = RRF_K,
+    use_reranking: bool = False,
 ) -> list[dict]:
     vector_store = get_code_vector_store(embeddings)
     return _hybrid_search(
-        db, vector_store, question, top_k, project_id=project_id, source_type="code", rrf_k=rrf_k
+        db,
+        vector_store,
+        question,
+        top_k,
+        project_id=project_id,
+        source_type="code",
+        rrf_k=rrf_k,
+        use_reranking=use_reranking,
     )
 
 
 def hybrid_search_docs(
-    db: Session, embeddings, question: str, top_k: int = 5, rrf_k: int = RRF_K
+    db: Session,
+    embeddings,
+    question: str,
+    top_k: int = 5,
+    rrf_k: int = RRF_K,
+    use_reranking: bool = False,
 ) -> list[dict]:
     vector_store = get_docs_vector_store(embeddings)
-    return _hybrid_search(db, vector_store, question, top_k, source_type="official_doc", rrf_k=rrf_k)
+    return _hybrid_search(
+        db,
+        vector_store,
+        question,
+        top_k,
+        source_type="official_doc",
+        rrf_k=rrf_k,
+        use_reranking=use_reranking,
+    )

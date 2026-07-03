@@ -88,9 +88,30 @@ rrf_k=300  hit@1=0.714  hit@3=0.886  recall@5=0.971  mrr=0.823
 
 `RRF_K`는 문헌상 표준값인 60을 그대로 사용하기로 했다 (k=30이 근소하게 나았지만 차이가 노이즈 수준).
 
+---
+
+## V4: Reranking (#15) — 채택하지 않음
+
+RRF Top-20 후보를 FlashRank 경량 cross-encoder로 재정렬해서 V3에서 떨어진 Hit@1을 회복하려 했다. 결과는 회복은커녕 큰 폭으로 더 나빠졌다.
+
+| Version | Reranker | Hit@1 | Hit@3 | Recall@5 | MRR | 평균 지연 |
+|---|---|---|---|---|---|---|
+| V3 | 없음 | 0.714 | 0.886 | 0.971 | 0.823 | ~900 ms |
+| V4a | ms-marco-TinyBERT-L-2-v2 | 0.029 | 0.457 | 0.714 | 0.289 | ~1060 ms |
+| V4b | ms-marco-MiniLM-L-12-v2 | 0.200 | 0.571 | 0.686 | 0.413 | ~5790 ms |
+
+### 원인
+
+`services/review_service.py`의 LLM 프롬프트 템플릿 chunk(`PROMPT_TEMPLATE` — `[사용자 질문]`, `{question}`, `관련 코드` 같은 한국어 placeholder 텍스트를 담은 코드)가 질문 주제와 전혀 무관한데도 거의 모든 질문에서 0.99에 가까운 점수를 받아 상위를 독점했다. TinyBERT(영어 전용)뿐 아니라 다국어 모델(MultiBERT), 더 큰 모델(MiniLM-L-12)까지 같은 실패 패턴을 보였다 — 특정 모델의 결함이 아니라, 지금 시도한 FlashRank 경량 reranker들 전반이 "한국어 질문 + 영어 코드/한국어 docstring·프롬프트가 섞인 코드베이스" 조합에 안정적으로 대응하지 못하는 것으로 보인다. 프롬프트 템플릿처럼 "질문"/"코드" 같은 메타 어휘를 담은 텍스트가 실제 내용과 무관하게 높은 점수를 받는 표면적 패턴 매칭 실패로 추정된다.
+
+### 결정
+
+reranking 코드(`app/core/reranker.py`, `hybrid_search.py`의 `use_reranking`)는 남겨두되 **기본값을 `False`로 꺼둔다**. 실제 서비스는 V3(RRF까지만)로 동작한다. 더 나은 reranker(다국어 특화 모델, LLM 기반 relevance scoring 등)를 나중에 검토할 수 있도록 opt-in 구조는 유지한다.
+
 ### 다음 비교 대상
 
-- V4: V3 + Reranking (#15) — RRF로 넓게 후보를 모은 뒤 reranker로 재정렬하면 이번에 하락한 Hit@1을 회복할 가능성이 높다
+- V5: 검색 결과 파일 다양성 조정 (#16)
+- 향후: LLM 기반 reranking 또는 더 큰/특화된 cross-encoder 재검토
 - V5: V4 + 파일 다양성 조정 (#16)
 
 ---

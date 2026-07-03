@@ -55,7 +55,9 @@ def get_or_create_project(db, name: str, root_path: str) -> Project:
     return db.query(Project).filter(Project.name == name).first()
 
 
-def evaluate(root: str, label: str, k: int, reindex: bool, search_k: int, hybrid: bool) -> dict:
+def evaluate(
+    root: str, label: str, k: int, reindex: bool, search_k: int, hybrid: bool, rerank: bool
+) -> dict:
     Base.metadata.create_all(bind=engine)
     ensure_fts_table()
     db = SessionLocal()
@@ -83,7 +85,9 @@ def evaluate(root: str, label: str, k: int, reindex: bool, search_k: int, hybrid
     for case in dataset:
         search_start = time.perf_counter()
         if hybrid:
-            items = hybrid_search_code(db, embeddings, case["query"], project.id, top_k=search_k)
+            items = hybrid_search_code(
+                db, embeddings, case["query"], project.id, top_k=search_k, use_reranking=rerank
+            )
             file_paths = [item["metadata"].get("file_path") for item in items]
         else:
             results = vector_store.similarity_search(case["query"], k=search_k)
@@ -148,6 +152,9 @@ def main() -> None:
     parser.add_argument("--search-k", type=int, default=20)
     parser.add_argument("--no-reindex", action="store_true")
     parser.add_argument("--hybrid", action="store_true", help="Use Dense+BM25 hybrid search (#14)")
+    parser.add_argument(
+        "--no-rerank", action="store_true", help="Disable FlashRank reranking (only with --hybrid)"
+    )
     args = parser.parse_args()
 
     evaluate(
@@ -157,6 +164,7 @@ def main() -> None:
         reindex=not args.no_reindex,
         search_k=args.search_k,
         hybrid=args.hybrid,
+        rerank=not args.no_rerank,
     )
 
 

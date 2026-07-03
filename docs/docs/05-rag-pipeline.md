@@ -470,6 +470,8 @@ FastAPI JSONResponse return Response directly jsonable_encoder
 
 Vector search 결과를 reranker로 재정렬하여 실제 관련성이 높은 chunk를 우선 사용합니다.
 
+FlashRank 경량 cross-encoder(`ms-marco-TinyBERT-L-2-v2`, `ms-marco-MiniLM-L-12-v2`)로 시도했으나, 이 프로젝트의 한국어 질문 + 영어 코드/한국어 docstring·프롬프트 혼합 코드베이스에서 오히려 검색 품질이 크게 나빠져(MRR 0.82 → 0.29~0.41) 기본값을 꺼두었다 (`eval/results.md` V4 참고). 코드는 opt-in으로 남겨뒀고, 더 나은 reranker를 나중에 검토할 수 있다.
+
 ---
 
 ### 11.4 Metadata Filtering

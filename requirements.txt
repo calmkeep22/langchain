@@ -12,3 +12,4 @@ langchain-openai
 langchain-community
 beautifulsoup4
 html2text
+flashrank
