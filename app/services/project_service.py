@@ -26,3 +26,7 @@ def get_project(db: Session, project_id: int) -> Project:
     if not project:
         raise ServiceError("PROJECT_NOT_FOUND", "Project not found.", 404)
     return project
+
+
+def list_projects(db: Session) -> list[Project]:
+    return db.query(Project).order_by(Project.id).all()

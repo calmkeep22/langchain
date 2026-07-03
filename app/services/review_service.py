@@ -286,3 +286,12 @@ def get_review(db: Session, review_id: int) -> Review:
     if not review:
         raise ServiceError("REVIEW_NOT_FOUND", "Review not found.", 404)
     return review
+
+
+def list_reviews(db: Session, project_id: int) -> list[Review]:
+    return (
+        db.query(Review)
+        .filter(Review.project_id == project_id)
+        .order_by(Review.created_at.desc())
+        .all()
+    )
