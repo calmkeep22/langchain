@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app.api import health, index, projects, retrievals, reviews
+from app.core.fts import ensure_fts_table
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIDMiddleware
 from app.db.session import Base, engine
@@ -8,6 +9,7 @@ from app.models import chunk, document, project, request_log, retrieval_log, rev
 
 configure_logging()
 Base.metadata.create_all(bind=engine)
+ensure_fts_table()
 
 app = FastAPI(title="RAG Code Reviewer")
 

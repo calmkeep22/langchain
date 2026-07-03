@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.embeddings import EmbeddingConfigError, get_embeddings
 from app.core.errors import ServiceError
+from app.core.fts import delete_fts_rows, index_fts_rows
 from app.core.logging import log_event
 from app.core.tree import build_url_tree
 from app.core.vector_store import get_docs_vector_store
@@ -135,20 +136,38 @@ def index_docs(
             old_vector_ids = [c.vector_id for c in old_chunks]
             if old_vector_ids:
                 vector_store.delete(ids=old_vector_ids)
+            delete_fts_rows(db, [c.id for c in old_chunks])
             for c in old_chunks:
                 db.delete(c)
             document.content_hash = content_hash
 
+        chunk_objects = []
         for c, meta, vector_id in zip(chunks, metadatas, vector_ids):
-            db.add(
-                Chunk(
-                    document_id=document.id,
-                    vector_id=vector_id,
-                    chunk_index=c["chunk_index"],
-                    content_preview=c["text"][:200],
-                    metadata_json=json.dumps(meta),
-                )
+            chunk_obj = Chunk(
+                document_id=document.id,
+                vector_id=vector_id,
+                chunk_index=c["chunk_index"],
+                content_preview=c["text"][:200],
+                metadata_json=json.dumps(meta),
             )
+            db.add(chunk_obj)
+            chunk_objects.append((chunk_obj, c, meta))
+
+        db.flush()
+        index_fts_rows(
+            db,
+            [
+                {
+                    "chunk_id": chunk_obj.id,
+                    "project_id": None,
+                    "source_type": source_type,
+                    "file_path": source,
+                    "symbol_name": meta.get("h2") or meta.get("h1") or "",
+                    "content": c["text"],
+                }
+                for chunk_obj, c, meta in chunk_objects
+            ]
+        )
 
         indexed_documents += 1
         indexed_chunks += len(chunks)

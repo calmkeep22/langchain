@@ -194,6 +194,23 @@ erDiagram
 
 ---
 
+## 6.1 chunk_fts (SQLite FTS5 가상 테이블)
+
+하이브리드 검색(BM25)을 위한 키워드 검색 인덱스. `chunks`와 별도로 관리되며, 인덱싱 시점에 chunk 원문 전체와 함께 채워진다.
+
+| Column | Type | Description |
+|---|---|---|
+| chunk_id | integer (UNINDEXED) | chunks.id |
+| project_id | integer (UNINDEXED) | 코드 chunk의 프로젝트 ID, 공식문서는 null |
+| source_type | string (UNINDEXED) | code 또는 official_doc |
+| file_path | text | 파일 경로 또는 문서 출처 (검색 대상) |
+| symbol_name | text | 함수/메서드/섹션 이름 (검색 대상) |
+| content | text | chunk 원문 전체 (검색 대상, `chunks.content_preview`와 달리 길이 제한 없음) |
+
+`UNINDEXED` 컬럼은 전문 검색 대상이 아니라 필터링(프로젝트 ID, source_type)에만 사용된다.
+
+---
+
 ## 7. reviews
 
 사용자 질문과 LLM 리뷰 결과를 저장합니다.

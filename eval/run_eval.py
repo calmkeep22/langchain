@@ -12,7 +12,7 @@ this pulls a wider raw candidate pool (``--search-k``, default 20) and
 only then dedupes down to a per-file ranking before computing Hit@k/MRR.
 
 Usage:
-    python eval/run_eval.py [--root PATH] [--label V1] [--k 5] [--search-k 20] [--no-reindex]
+    python eval/run_eval.py [--root PATH] [--label V1] [--k 5] [--search-k 20] [--no-reindex] [--hybrid]
 """
 
 import argparse
@@ -26,11 +26,13 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from app.core.embeddings import get_embeddings  # noqa: E402
 from app.core.errors import ServiceError  # noqa: E402
+from app.core.fts import ensure_fts_table  # noqa: E402
 from app.core.vector_store import get_code_vector_store  # noqa: E402
 from app.db.session import Base, SessionLocal, engine  # noqa: E402
 from app.models import chunk, document, project  # noqa: E402, F401
 from app.models.project import Project  # noqa: E402
 from app.services.code_indexing_service import index_project_code  # noqa: E402
+from app.services.hybrid_search import hybrid_search_code  # noqa: E402
 from app.services.project_service import create_project  # noqa: E402
 
 DATASET_PATH = REPO_ROOT / "eval" / "dataset.json"
@@ -53,8 +55,9 @@ def get_or_create_project(db, name: str, root_path: str) -> Project:
     return db.query(Project).filter(Project.name == name).first()
 
 
-def evaluate(root: str, label: str, k: int, reindex: bool, search_k: int) -> dict:
+def evaluate(root: str, label: str, k: int, reindex: bool, search_k: int, hybrid: bool) -> dict:
     Base.metadata.create_all(bind=engine)
+    ensure_fts_table()
     db = SessionLocal()
 
     project = get_or_create_project(db, "eval-self-index", root)
@@ -79,12 +82,16 @@ def evaluate(root: str, label: str, k: int, reindex: bool, search_k: int) -> dic
 
     for case in dataset:
         search_start = time.perf_counter()
-        results = vector_store.similarity_search(case["query"], k=search_k)
+        if hybrid:
+            items = hybrid_search_code(db, embeddings, case["query"], project.id, top_k=search_k)
+            file_paths = [item["metadata"].get("file_path") for item in items]
+        else:
+            results = vector_store.similarity_search(case["query"], k=search_k)
+            file_paths = [doc.metadata.get("file_path") for doc in results]
         latencies_ms.append((time.perf_counter() - search_start) * 1000)
 
         ranked_files = []
-        for doc in results:
-            file_path = doc.metadata.get("file_path")
+        for file_path in file_paths:
             if file_path not in ranked_files:
                 ranked_files.append(file_path)
 
@@ -125,9 +132,9 @@ def evaluate(root: str, label: str, k: int, reindex: bool, search_k: int) -> dic
 
     print(json.dumps(metrics, indent=2, ensure_ascii=False))
     for row in rows:
-        status = "OK" if row["rank"] else "MISS"
+        status = "OK" if row["rank"] is not None and row["rank"] <= 5 else "MISS"
         print(f"[{status}] rank={row['rank']}  Q: {row['query']}")
-        if not row["rank"]:
+        if status == "MISS":
             print(f"       expected={row['expected_file']}  retrieved={row['retrieved']}")
 
     return metrics
@@ -140,6 +147,7 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--search-k", type=int, default=20)
     parser.add_argument("--no-reindex", action="store_true")
+    parser.add_argument("--hybrid", action="store_true", help="Use Dense+BM25 hybrid search (#14)")
     args = parser.parse_args()
 
     evaluate(
@@ -148,6 +156,7 @@ def main() -> None:
         k=args.k,
         reindex=not args.no_reindex,
         search_k=args.search_k,
+        hybrid=args.hybrid,
     )
 
 
