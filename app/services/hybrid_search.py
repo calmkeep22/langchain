@@ -11,6 +11,7 @@ RRF_K = 60
 DENSE_K = 20
 SPARSE_K = 20
 RERANK_POOL = 20
+DEFAULT_MAX_PER_FILE = 2
 
 # use_reranking defaults to False: both FlashRank models tested
 # (ms-marco-TinyBERT-L-2-v2, ms-marco-MiniLM-L-12-v2) made results
@@ -26,6 +27,31 @@ def reciprocal_rank_fusion(rank_lists: list[list[int]], k: int = RRF_K) -> dict[
         for rank_position, chunk_id in enumerate(ranked_ids, start=1):
             scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (k + rank_position)
     return scores
+
+
+def diversify_by_file(items: list[dict], max_per_file: int | None, limit: int) -> list[dict]:
+    """Cap how many chunks from the same file can occupy the candidate pool.
+
+    Without this, a file that strongly matches the query can fill every
+    slot with its own chunks, crowding out other genuinely relevant files.
+    ``max_per_file=None`` disables the cap (e.g. for a query that's clearly
+    about one specific file -- reserved for the future query router, #17).
+    """
+    if max_per_file is None:
+        return items[:limit]
+
+    counts: dict[str, int] = {}
+    selected: list[dict] = []
+    for item in items:
+        meta = item["metadata"]
+        key = meta.get("file_path") or meta.get("source")
+        if counts.get(key, 0) >= max_per_file:
+            continue
+        selected.append(item)
+        counts[key] = counts.get(key, 0) + 1
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def _resolve_chunk_id(db: Session, vector_id: str | None) -> int | None:
@@ -45,6 +71,7 @@ def _hybrid_search(
     source_type: str | None = None,
     rrf_k: int = RRF_K,
     use_reranking: bool = False,
+    max_per_file: int | None = DEFAULT_MAX_PER_FILE,
 ) -> list[dict]:
     dense_filter = {"project_id": project_id} if project_id is not None else None
     dense_results = vector_store.similarity_search_with_score(
@@ -87,10 +114,11 @@ def _hybrid_search(
     rrf_scores = reciprocal_rank_fusion([dense_rank_ids, sparse_rank_ids], k=rrf_k)
     ranked_ids = sorted(combined.keys(), key=lambda cid: rrf_scores.get(cid, 0.0), reverse=True)
 
-    candidates = [
+    ranked_items = [
         {**combined[chunk_id], "score": round(rrf_scores.get(chunk_id, 0.0), 5)}
-        for chunk_id in ranked_ids[:RERANK_POOL]
+        for chunk_id in ranked_ids
     ]
+    candidates = diversify_by_file(ranked_items, max_per_file, RERANK_POOL)
 
     if not use_reranking:
         return candidates[:top_k]
@@ -106,6 +134,7 @@ def hybrid_search_code(
     top_k: int = 5,
     rrf_k: int = RRF_K,
     use_reranking: bool = False,
+    max_per_file: int | None = DEFAULT_MAX_PER_FILE,
 ) -> list[dict]:
     vector_store = get_code_vector_store(embeddings)
     return _hybrid_search(
@@ -117,6 +146,7 @@ def hybrid_search_code(
         source_type="code",
         rrf_k=rrf_k,
         use_reranking=use_reranking,
+        max_per_file=max_per_file,
     )
 
 
@@ -127,6 +157,7 @@ def hybrid_search_docs(
     top_k: int = 5,
     rrf_k: int = RRF_K,
     use_reranking: bool = False,
+    max_per_file: int | None = DEFAULT_MAX_PER_FILE,
 ) -> list[dict]:
     vector_store = get_docs_vector_store(embeddings)
     return _hybrid_search(
@@ -137,4 +168,5 @@ def hybrid_search_docs(
         source_type="official_doc",
         rrf_k=rrf_k,
         use_reranking=use_reranking,
+        max_per_file=max_per_file,
     )
