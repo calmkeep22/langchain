@@ -317,6 +317,20 @@ Dense 검색 (Top-20)      BM25 검색 (Top-20, SQLite FTS5)
 
 ---
 
+### 7.0.1 질의 유형 분류 (Query Router, #17)
+
+하이브리드 검색을 실행하기 전에, 질문 텍스트를 규칙 기반으로 분류해 검색 파라미터를 조정한다. LLM을 호출하지 않는 정규식/키워드 매칭이라 비용이 없고 즉시 처리된다.
+
+| 질의 유형 | 판단 기준 | 조정 내용 |
+|---|---|---|
+| `symbol` | 함수 호출(`foo(`), `Class.method`, `ALL_CAPS_CONST`, `snake_case` 식별자를 포함 | `sparse_weight=2.0` (BM25 키워드 매칭을 dense보다 더 신뢰) |
+| `architecture` | "흐름", "구조", "아키텍처", "전체" 등 키워드 포함 | `top_k=top_k*2` (여러 파일에 걸친 근거가 필요) |
+| `natural_language` | 위 두 조건에 해당하지 않는 일반 질문 (기본값) | 기존과 동일 (`dense_weight=sparse_weight=1.0`) |
+
+`eval/dataset.json` 35개 질문 기준 분류 결과는 자연어 33개, symbol 2개(`code_chunks`, `force_reindex`처럼 실제 식별자를 지목한 질문)로, symbol 오탐은 거의 없다. 대부분의 질문이 `natural_language`로 분류되므로 기존 검색 품질에는 영향이 없다 (`eval/results.md` V6 참고).
+
+---
+
 ### 7.1 코드 검색
 
 사용자 질문을 기반으로 코드 vector store와 `chunk_fts`에서 관련 chunk를 하이브리드 검색합니다.
@@ -464,6 +478,12 @@ FastAPI JSONResponse return Response directly jsonable_encoder
 ### 11.2 Multi-query Retrieval
 
 하나의 질문에서 여러 검색 쿼리를 생성하여 누락을 줄입니다.
+
+---
+
+### 11.2.1 질의 유형 분류 (적용 완료, #17)
+
+Query Rewriting/Multi-query처럼 LLM으로 쿼리 자체를 바꾸는 대신, 규칙 기반으로 질문 유형만 분류해 검색 파라미터(가중치, top_k)를 조정하는 더 단순한 버전을 먼저 적용했다. 자세한 내용은 7.0.1 참고.
 
 ---
 

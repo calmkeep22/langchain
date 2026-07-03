@@ -21,11 +21,15 @@ DEFAULT_MAX_PER_FILE = 2
 # plumbing is kept so a better-suited reranker can be swapped in later.
 
 
-def reciprocal_rank_fusion(rank_lists: list[list[int]], k: int = RRF_K) -> dict[int, float]:
+def reciprocal_rank_fusion(
+    rank_lists: list[list[int]], k: int = RRF_K, weights: list[float] | None = None
+) -> dict[int, float]:
+    if weights is None:
+        weights = [1.0] * len(rank_lists)
     scores: dict[int, float] = {}
-    for ranked_ids in rank_lists:
+    for weight, ranked_ids in zip(weights, rank_lists):
         for rank_position, chunk_id in enumerate(ranked_ids, start=1):
-            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (k + rank_position)
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + weight / (k + rank_position)
     return scores
 
 
@@ -35,7 +39,7 @@ def diversify_by_file(items: list[dict], max_per_file: int | None, limit: int) -
     Without this, a file that strongly matches the query can fill every
     slot with its own chunks, crowding out other genuinely relevant files.
     ``max_per_file=None`` disables the cap (e.g. for a query that's clearly
-    about one specific file -- reserved for the future query router, #17).
+    about one specific file -- see query_router.py, #17).
     """
     if max_per_file is None:
         return items[:limit]
@@ -72,6 +76,8 @@ def _hybrid_search(
     rrf_k: int = RRF_K,
     use_reranking: bool = False,
     max_per_file: int | None = DEFAULT_MAX_PER_FILE,
+    dense_weight: float = 1.0,
+    sparse_weight: float = 1.0,
 ) -> list[dict]:
     dense_filter = {"project_id": project_id} if project_id is not None else None
     dense_results = vector_store.similarity_search_with_score(
@@ -111,7 +117,9 @@ def _hybrid_search(
     if not combined:
         return []
 
-    rrf_scores = reciprocal_rank_fusion([dense_rank_ids, sparse_rank_ids], k=rrf_k)
+    rrf_scores = reciprocal_rank_fusion(
+        [dense_rank_ids, sparse_rank_ids], k=rrf_k, weights=[dense_weight, sparse_weight]
+    )
     ranked_ids = sorted(combined.keys(), key=lambda cid: rrf_scores.get(cid, 0.0), reverse=True)
 
     ranked_items = [
@@ -135,6 +143,8 @@ def hybrid_search_code(
     rrf_k: int = RRF_K,
     use_reranking: bool = False,
     max_per_file: int | None = DEFAULT_MAX_PER_FILE,
+    dense_weight: float = 1.0,
+    sparse_weight: float = 1.0,
 ) -> list[dict]:
     vector_store = get_code_vector_store(embeddings)
     return _hybrid_search(
@@ -147,6 +157,8 @@ def hybrid_search_code(
         rrf_k=rrf_k,
         use_reranking=use_reranking,
         max_per_file=max_per_file,
+        dense_weight=dense_weight,
+        sparse_weight=sparse_weight,
     )
 
 
@@ -158,6 +170,8 @@ def hybrid_search_docs(
     rrf_k: int = RRF_K,
     use_reranking: bool = False,
     max_per_file: int | None = DEFAULT_MAX_PER_FILE,
+    dense_weight: float = 1.0,
+    sparse_weight: float = 1.0,
 ) -> list[dict]:
     vector_store = get_docs_vector_store(embeddings)
     return _hybrid_search(
@@ -169,4 +183,6 @@ def hybrid_search_docs(
         rrf_k=rrf_k,
         use_reranking=use_reranking,
         max_per_file=max_per_file,
+        dense_weight=dense_weight,
+        sparse_weight=sparse_weight,
     )

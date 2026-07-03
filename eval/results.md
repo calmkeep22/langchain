@@ -146,6 +146,27 @@ RRF 순위 리스트에서 같은 파일의 chunk가 후보 풀(`RERANK_POOL=20`
 
 ---
 
+## V6: 질의 유형 분류 및 Query Router (#17)
+
+질문을 `symbol`/`architecture`/`natural_language` 세 유형으로 분류해 `dense_weight`/`sparse_weight`/`top_k`를 조정하는 규칙 기반 라우터를 추가했다. `eval/dataset.json`은 대부분(33/35) `natural_language`로 분류되어 기존과 동일한 파라미터를 받으므로, 회귀가 없는지 확인하는 것이 이번 측정의 목적이다.
+
+| Version | Hit@1 | Hit@3 | Recall@5 | MRR |
+|---|---|---|---|---|
+| V5 (Query Router 적용 전) | 0.714 | 0.886 | 0.971 | 0.823 |
+| V6 (Query Router 적용 후, `--hybrid --no-rerank`) | 0.714 | 0.886 | 0.971 | 0.822 |
+
+지표 동일 (MRR 0.001 차이는 반올림). 이 eval 세트로는 라우팅 자체의 효과를 측정할 수 없으므로 — symbol 질문 2개뿐이고 architecture 질문은 0개 — 분류 결과와 파라미터 변화를 직접 확인했다.
+
+```text
+"force_reindex 옵션은 어디서 처리해?"        → symbol            (sparse_weight=2.0)
+"코드 인덱싱 전체 흐름 설명해줘"              → architecture      (top_k_multiplier=2)
+"임베딩 API 키가 없을 때 발생하는 예외는?"    → natural_language  (기본값 그대로)
+```
+
+symbol 분류 정규식에서 `API`, `POST`, `JSON` 같은 일반 약어가 `ALL_CAPS` 패턴에 걸려 오탐되는 문제가 있었다 (35개 중 8개가 symbol로 잘못 분류됨). 패턴에 언더스코어(`_`)를 필수로 요구하도록 수정해 오탐을 2개로 줄였다 (`code_chunks`, `force_reindex`처럼 실제 식별자를 지목한 정상 케이스만 남음).
+
+---
+
 ## 공식문서(URL) 검색 평가
 
 `eval/docs_dataset.json` 기준, `eval/run_docs_eval.py`로 측정한 결과 기록.
