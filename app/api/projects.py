@@ -5,7 +5,7 @@ from app.core.errors import ServiceError, service_error_response
 from app.db.session import get_db
 from app.schemas.common import SuccessResponse, current_request_id
 from app.schemas.project import ProjectCreate
-from app.services.project_service import create_project, get_project
+from app.services.project_service import create_project, get_project, list_projects
 
 router = APIRouter()
 
@@ -23,6 +23,22 @@ def register_project(payload: ProjectCreate, db: Session = Depends(get_db)):
             "name": project.name,
             "root_path": project.root_path,
         },
+        request_id=current_request_id(),
+    )
+
+
+@router.get("/projects")
+def list_projects_endpoint(db: Session = Depends(get_db)):
+    projects = list_projects(db)
+    return SuccessResponse(
+        data=[
+            {
+                "project_id": project.id,
+                "name": project.name,
+                "root_path": project.root_path,
+            }
+            for project in projects
+        ],
         request_id=current_request_id(),
     )
 

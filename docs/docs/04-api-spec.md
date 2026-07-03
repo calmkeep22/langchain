@@ -132,6 +132,28 @@
 
 ---
 
+### GET /api/projects
+
+등록된 프로젝트 목록을 조회합니다 (UI의 프로젝트 선택 목록용, #32).
+
+#### Response
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "project_id": 1,
+      "name": "sample-fastapi-project",
+      "root_path": "./data/sample_projects/fastapi_app"
+    }
+  ],
+  "request_id": "req_abc123"
+}
+```
+
+---
+
 ## 6. Indexing API
 
 ### POST /api/index/code
@@ -320,6 +342,29 @@ URL 크롤링으로 여러 페이지가 수집된 경우 `indexed_documents`는 
 | Code | Status | Description |
 |---|---:|---|
 | REVIEW_NOT_FOUND | 404 | 리뷰 결과를 찾을 수 없음 |
+
+---
+
+### GET /api/projects/{project_id}/reviews
+
+프로젝트의 리뷰 히스토리 목록을 최신순으로 조회합니다 (UI의 히스토리 화면용, #32).
+
+#### Response
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "review_id": 10,
+      "question": "이 JSONResponse 사용 방식 공식문서 기준으로 괜찮아?",
+      "verdict": "PROBLEM",
+      "created_at": "2026-07-01T12:10:00"
+    }
+  ],
+  "request_id": "req_abc123"
+}
+```
 
 ---
 
