@@ -1,5 +1,6 @@
 import time
 from enum import Enum
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -51,7 +52,15 @@ class ReviewAnswer(BaseModel):
     )
 
 
-def _build_code_context(results: list[tuple]) -> tuple[str, list[dict]]:
+def _read_line_range(root_path: str, relative_path: str, start_line: int, end_line: int) -> str | None:
+    try:
+        lines = (Path(root_path) / relative_path).read_text(encoding="utf-8", errors="ignore").splitlines()
+        return "\n".join(lines[start_line - 1 : end_line])
+    except OSError:
+        return None
+
+
+def _build_code_context(results: list[tuple], project_root_path: str) -> tuple[str, list[dict]]:
     if not results:
         return "(검색된 코드 없음)", []
 
@@ -62,7 +71,19 @@ def _build_code_context(results: list[tuple]) -> tuple[str, list[dict]]:
         file_path = meta.get("file_path")
         start_line = meta.get("start_line")
         end_line = meta.get("end_line")
-        blocks.append(f"File: {file_path} (L{start_line}-{end_line})\n{doc.page_content}")
+        parent_start = meta.get("parent_start_line")
+        parent_end = meta.get("parent_end_line")
+
+        # Small-to-Big: the match is a small unit (a method), but the LLM gets
+        # the whole enclosing class for context, re-read live from disk since
+        # only the small chunk's text is stored in the vector store.
+        display_start, display_end, code_text = start_line, end_line, doc.page_content
+        if parent_start and parent_end:
+            expanded = _read_line_range(project_root_path, file_path, parent_start, parent_end)
+            if expanded is not None:
+                display_start, display_end, code_text = parent_start, parent_end, expanded
+
+        blocks.append(f"File: {file_path} (L{display_start}-{display_end})\n{code_text}")
         related_code.append(
             {
                 "file_path": file_path,
@@ -173,7 +194,7 @@ def create_review(
         latency_ms=int((time.perf_counter() - retrieval_start) * 1000),
     )
 
-    code_context, related_code = _build_code_context(code_results)
+    code_context, related_code = _build_code_context(code_results, project.root_path)
     doc_context, official_references = _build_doc_context(doc_results)
 
     if llm is None:

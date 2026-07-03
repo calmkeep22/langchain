@@ -169,9 +169,11 @@ erDiagram
   "project_id": 1,
   "file_path": "app/services/camera_service.py",
   "language": "python",
-  "symbol_type": "function",
-  "symbol_name": "create_camera",
-  "class_name": "CameraService",
+  "chunk_type": "method",
+  "symbol_name": "CameraService.create_camera",
+  "parent_symbol": "CameraService",
+  "parent_start_line": 5,
+  "parent_end_line": 60,
   "start_line": 10,
   "end_line": 48
 }

@@ -93,13 +93,18 @@ target
 
 ---
 
-### 4.4 초기 chunking 전략
+### 4.4 chunking 전략
 
-초기 버전에서는 구현 난이도를 낮추기 위해 파일 단위 chunking을 우선 적용합니다.
+Python 파일은 AST(`ast` 모듈) 기반으로 함수/메서드 단위 chunking을 적용합니다.
 
-긴 파일은 `RecursiveCharacterTextSplitter`를 사용하여 추가 분할합니다.
+- 최상위 함수: 함수 하나가 chunk 하나
+- 클래스: 메서드 하나가 chunk 하나. `parent_symbol`(클래스 이름)과 `parent_start_line`/`parent_end_line`(클래스 전체 범위)을 metadata로 함께 저장 (Small-to-Big)
+- 메서드가 없는 클래스: 클래스 전체를 chunk 하나로 저장
+- 함수/클래스에 걸리지 않는 모듈 레벨 코드(import, 전역 변수 등): 별도 chunk로 저장
+- 하나의 chunk가 `MAX_SYMBOL_CHUNK_SIZE`(4000자)를 넘으면 `RecursiveCharacterTextSplitter`로 추가 분할
+- 구문 오류로 AST 파싱이 실패하면 파일 단위 chunking으로 대체
 
-초기 설정 예시:
+Python 외 언어(.md, .yml, .yaml, .json 등)와 AST 파싱 실패 시에는 파일 전체를 `RecursiveCharacterTextSplitter`로 분할합니다.
 
 ```text
 chunk_size = 1200
@@ -108,16 +113,12 @@ chunk_overlap = 200
 
 ---
 
-### 4.5 향후 chunking 전략
+### 4.5 Small-to-Big 검색/컨텍스트 구성
 
-코드 리뷰 품질을 높이기 위해 향후 다음 방식으로 개선합니다.
+검색은 작은 단위(함수/메서드)로 하되, 리뷰 답변 생성 시에는 더 넓은 문맥을 LLM에 제공합니다.
 
-| 단계 | 전략 |
-|---|---|
-| 1차 | 파일 단위 chunking |
-| 2차 | Python AST 기반 함수/클래스 단위 chunking |
-| 3차 | import, class, function, decorator metadata 추출 |
-| 4차 | Controller → Service → Repository 호출 관계 추출 |
+- 검색된 chunk에 `parent_start_line`/`parent_end_line`이 있으면(= 클래스의 메서드), 해당 파일을 프로젝트 `root_path` 기준으로 다시 읽어 클래스 전체 범위를 LLM 컨텍스트로 사용합니다.
+- `related_code` 응답에는 실제로 매칭된 작은 범위(`start_line`/`end_line`)를 그대로 반환해 검색 근거는 정확하게 유지합니다.
 
 ---
 
@@ -131,16 +132,18 @@ chunk_overlap = 200
   "project_id": 1,
   "file_path": "app/services/camera_service.py",
   "language": "python",
-  "symbol_type": "function",
-  "symbol_name": "create_camera",
-  "class_name": "CameraService",
+  "chunk_type": "method",
+  "symbol_name": "CameraService.create_camera",
+  "parent_symbol": "CameraService",
+  "parent_start_line": 5,
+  "parent_end_line": 60,
   "start_line": 10,
   "end_line": 48,
   "chunk_index": 3
 }
 ```
 
-초기 파일 단위 chunking에서는 symbol 관련 값이 없을 수 있습니다.
+`chunk_type`은 `function`, `method`, `class`, `module`(AST 커버 범위 밖 코드), `block`(파일 단위 fallback) 중 하나입니다. `parent_symbol`/`parent_start_line`/`parent_end_line`은 메서드 chunk에만 존재합니다.
 
 ---
 
@@ -153,19 +156,16 @@ chunk_overlap = 200
 ```text
 File: app/services/camera_service.py
 Language: python
-Class: CameraService
-Function: create_camera
+Type: method
+Symbol: CameraService.create_camera
+Parent: CameraService
 
 Code:
 def create_camera(...):
     ...
 ```
 
-향후에는 LLM 기반 요약을 추가할 수 있습니다.
-
-```text
-Summary: creates a camera, checks duplicate camera_id and stream_key, commits SQLAlchemy session.
-```
+`chunk_type`이 `module`/`block`인 경우 `Type`만 포함하고 `Symbol`/`Parent`는 생략합니다.
 
 ---
 
