@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     sqlite_path: str = "./data/app.db"
     chroma_persist_dir: str = "./data/chroma"
+    flashrank_cache_dir: str = "./data/flashrank_cache"
 
 
 @lru_cache
