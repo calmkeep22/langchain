@@ -13,6 +13,7 @@ from app.models.retrieval_log import RetrievalLog
 from app.models.review import Review
 from app.services.hybrid_search import hybrid_search_code, hybrid_search_docs
 from app.services.project_service import get_project
+from app.services.query_router import classify_query, routing_params
 
 PROMPT_TEMPLATE = """너는 백엔드 코드 리뷰어다.
 반드시 제공된 코드와 공식문서에 근거해서 답변해라.
@@ -148,11 +149,17 @@ def create_review(
 
     project = get_project(db, project_id)
 
+    query_type = classify_query(question)
+    routing = routing_params(query_type)
+    effective_code_top_k = code_top_k * routing["top_k_multiplier"]
+    effective_doc_top_k = doc_top_k * routing["top_k_multiplier"]
+
     start = time.perf_counter()
     log_event(
         "rag_review_started",
         project_id=project.id,
         question_length=len(question),
+        query_type=query_type.value,
         code_top_k=code_top_k,
         doc_top_k=doc_top_k,
     )
@@ -165,8 +172,23 @@ def create_review(
 
     retrieval_start = time.perf_counter()
     try:
-        code_items = hybrid_search_code(db, embeddings, question, project.id, top_k=code_top_k)
-        doc_items = hybrid_search_docs(db, embeddings, question, top_k=doc_top_k)
+        code_items = hybrid_search_code(
+            db,
+            embeddings,
+            question,
+            project.id,
+            top_k=effective_code_top_k,
+            dense_weight=routing["dense_weight"],
+            sparse_weight=routing["sparse_weight"],
+        )
+        doc_items = hybrid_search_docs(
+            db,
+            embeddings,
+            question,
+            top_k=effective_doc_top_k,
+            dense_weight=routing["dense_weight"],
+            sparse_weight=routing["sparse_weight"],
+        )
     except Exception as exc:
         raise ServiceError("RETRIEVAL_FAILED", "Vector search failed.", 500) from exc
 
@@ -178,6 +200,7 @@ def create_review(
     log_event(
         "retrieval_completed",
         project_id=project.id,
+        query_type=query_type.value,
         code_chunks=len(code_items),
         doc_chunks=len(doc_items),
         top_code_score=code_items[0]["score"] if code_items else None,
