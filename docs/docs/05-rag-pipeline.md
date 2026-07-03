@@ -295,9 +295,30 @@ flowchart TD
 
 ---
 
+### 7.0 하이브리드 검색 (Dense + BM25)
+
+벡터 유사도(dense) 검색만으로는 함수명, 에러 코드, 숫자 같은 정확한 키워드 매칭에 약하다. 코드/공식문서 검색 모두 다음처럼 dense 검색과 BM25 키워드 검색을 결합한 하이브리드 검색을 사용한다.
+
+```text
+질문
+  ↓                          ↓
+Dense 검색 (Top-20)      BM25 검색 (Top-20, SQLite FTS5)
+  ↓                          ↓
+        Reciprocal Rank Fusion (RRF, k=60)
+                  ↓
+              Top-K 반환
+```
+
+- **Dense 검색**: 기존과 동일하게 Chroma(`code_chunks`/`official_docs_chunks`)에서 임베딩 유사도로 검색
+- **BM25 검색**: SQLite FTS5 가상 테이블(`chunk_fts`)에서 chunk 원문 전체를 대상으로 키워드 검색. `chunk_fts`는 인덱싱 시점에 `chunks` 테이블과 함께 채워진다
+- **RRF 결합**: 두 순위 리스트를 `score = sum(1 / (k + rank))` 공식으로 합산해 최종 순위를 매긴다 (`k=60`)
+- 두 방식 중 하나에서만 검색된 chunk도 최종 후보에 포함될 수 있다 (dense에서만 잡히거나 BM25에서만 잡힌 경우 모두 인정)
+
+---
+
 ### 7.1 코드 검색
 
-사용자 질문을 기반으로 코드 vector store에서 관련 chunk를 검색합니다.
+사용자 질문을 기반으로 코드 vector store와 `chunk_fts`에서 관련 chunk를 하이브리드 검색합니다.
 
 기본값:
 

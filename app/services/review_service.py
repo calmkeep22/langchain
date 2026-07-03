@@ -9,10 +9,9 @@ from app.core.embeddings import EmbeddingConfigError, get_embeddings
 from app.core.errors import ServiceError
 from app.core.llm import LLMConfigError, get_llm
 from app.core.logging import log_event
-from app.core.vector_store import get_code_vector_store, get_docs_vector_store
-from app.models.chunk import Chunk
 from app.models.retrieval_log import RetrievalLog
 from app.models.review import Review
+from app.services.hybrid_search import hybrid_search_code, hybrid_search_docs
 from app.services.project_service import get_project
 
 PROMPT_TEMPLATE = """너는 백엔드 코드 리뷰어다.
@@ -60,14 +59,14 @@ def _read_line_range(root_path: str, relative_path: str, start_line: int, end_li
         return None
 
 
-def _build_code_context(results: list[tuple], project_root_path: str) -> tuple[str, list[dict]]:
-    if not results:
+def _build_code_context(items: list[dict], project_root_path: str) -> tuple[str, list[dict]]:
+    if not items:
         return "(검색된 코드 없음)", []
 
     blocks = []
     related_code = []
-    for doc, score in results:
-        meta = doc.metadata
+    for item in items:
+        meta = item["metadata"]
         file_path = meta.get("file_path")
         start_line = meta.get("start_line")
         end_line = meta.get("end_line")
@@ -77,7 +76,7 @@ def _build_code_context(results: list[tuple], project_root_path: str) -> tuple[s
         # Small-to-Big: the match is a small unit (a method), but the LLM gets
         # the whole enclosing class for context, re-read live from disk since
         # only the small chunk's text is stored in the vector store.
-        display_start, display_end, code_text = start_line, end_line, doc.page_content
+        display_start, display_end, code_text = start_line, end_line, item["text"]
         if parent_start and parent_end:
             expanded = _read_line_range(project_root_path, file_path, parent_start, parent_end)
             if expanded is not None:
@@ -90,51 +89,47 @@ def _build_code_context(results: list[tuple], project_root_path: str) -> tuple[s
                 "symbol_name": meta.get("symbol_name"),
                 "start_line": start_line,
                 "end_line": end_line,
-                "score": round(score, 4),
+                "score": item["score"],
             }
         )
     return "\n\n---\n\n".join(blocks), related_code
 
 
-def _build_doc_context(results: list[tuple]) -> tuple[str, list[dict]]:
-    if not results:
+def _build_doc_context(items: list[dict]) -> tuple[str, list[dict]]:
+    if not items:
         return "(검색된 공식문서 없음)", []
 
     blocks = []
     official_references = []
-    for doc, score in results:
-        meta = doc.metadata
+    for item in items:
+        meta = item["metadata"]
         headers = [h for h in (meta.get("h1"), meta.get("h2"), meta.get("h3")) if h]
         section = " > ".join(headers)
         title = headers[-1] if headers else meta.get("doc_name")
-        blocks.append(f"Document: {meta.get('doc_name')}\nSection: {section}\n\n{doc.page_content}")
+        blocks.append(f"Document: {meta.get('doc_name')}\nSection: {section}\n\n{item['text']}")
         official_references.append(
             {
                 "title": title,
                 "source": meta.get("source"),
                 "section": section,
-                "score": round(score, 4),
+                "score": item["score"],
             }
         )
     return "\n\n---\n\n".join(blocks), official_references
 
 
-def _save_retrieval_logs(
-    db: Session, review_id: int, results: list[tuple], source_type: str
-) -> None:
-    for rank, (doc, score) in enumerate(results, start=1):
-        meta = doc.metadata
-        vector_id = meta.get("vector_id")
-        chunk = db.query(Chunk).filter(Chunk.vector_id == vector_id).first() if vector_id else None
+def _save_retrieval_logs(db: Session, review_id: int, items: list[dict], source_type: str) -> None:
+    for rank, item in enumerate(items, start=1):
+        meta = item["metadata"]
         source = meta.get("file_path") if source_type == "code" else meta.get("source")
         db.add(
             RetrievalLog(
                 review_id=review_id,
-                chunk_id=chunk.id if chunk else None,
+                chunk_id=item.get("chunk_id"),
                 source_type=source_type,
                 source=source,
                 rank=rank,
-                score=round(score, 4),
+                score=item["score"],
             )
         )
 
@@ -170,16 +165,12 @@ def create_review(
 
     retrieval_start = time.perf_counter()
     try:
-        code_results = get_code_vector_store(embeddings).similarity_search_with_score(
-            question, k=code_top_k, filter={"project_id": project.id}
-        )
-        doc_results = get_docs_vector_store(embeddings).similarity_search_with_score(
-            question, k=doc_top_k
-        )
+        code_items = hybrid_search_code(db, embeddings, question, project.id, top_k=code_top_k)
+        doc_items = hybrid_search_docs(db, embeddings, question, top_k=doc_top_k)
     except Exception as exc:
         raise ServiceError("RETRIEVAL_FAILED", "Vector search failed.", 500) from exc
 
-    if not code_results and not doc_results:
+    if not code_items and not doc_items:
         raise ServiceError(
             "NO_RELEVANT_CONTEXT", "No relevant code or documentation found.", 422
         )
@@ -187,15 +178,15 @@ def create_review(
     log_event(
         "retrieval_completed",
         project_id=project.id,
-        code_chunks=len(code_results),
-        doc_chunks=len(doc_results),
-        top_code_score=round(code_results[0][1], 4) if code_results else None,
-        top_doc_score=round(doc_results[0][1], 4) if doc_results else None,
+        code_chunks=len(code_items),
+        doc_chunks=len(doc_items),
+        top_code_score=code_items[0]["score"] if code_items else None,
+        top_doc_score=doc_items[0]["score"] if doc_items else None,
         latency_ms=int((time.perf_counter() - retrieval_start) * 1000),
     )
 
-    code_context, related_code = _build_code_context(code_results, project.root_path)
-    doc_context, official_references = _build_doc_context(doc_results)
+    code_context, related_code = _build_code_context(code_items, project.root_path)
+    doc_context, official_references = _build_doc_context(doc_items)
 
     if llm is None:
         try:
@@ -236,8 +227,8 @@ def create_review(
     db.commit()
     db.refresh(review)
 
-    _save_retrieval_logs(db, review.id, code_results, "code")
-    _save_retrieval_logs(db, review.id, doc_results, "official_doc")
+    _save_retrieval_logs(db, review.id, code_items, "code")
+    _save_retrieval_logs(db, review.id, doc_items, "official_doc")
     db.commit()
 
     log_event(
@@ -245,8 +236,8 @@ def create_review(
         review_id=review.id,
         project_id=project.id,
         verdict=review.verdict,
-        code_chunks=len(code_results),
-        doc_chunks=len(doc_results),
+        code_chunks=len(code_items),
+        doc_chunks=len(doc_items),
         model=model_name,
         latency_ms=latency_ms,
     )
